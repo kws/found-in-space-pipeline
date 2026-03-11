@@ -8,8 +8,8 @@ The pipeline produces Parquet tables with a fixed schema. Each row is a star wit
 
 - **Sun-centric Cartesian coordinates** (ICRS frame, J2016.0): `x_icrs_pc`, `y_icrs_pc`, `z_icrs_pc` (parsecs). The origin is the Sun; axes follow the ICRS convention.
 - **Identifiers and source**: `source` (e.g. `"gaia"`), `source_id`, `morton_code` (3D spatial index).
-- **Photometry**: `mag_abs` (absolute magnitude), `teff` (effective temperature, K), plus `photometry_method` and `photometry_quality`.
-- **Astrometry metadata**: `astrometry_method`, `astrometry_quality` (e.g. fractional parallax error or Bailer-Jones interval width).
+- **Photometry**: `mag_abs` (absolute magnitude), `teff` (effective temperature, K), `photometry_quality` (magnitude uncertainty).
+- **Provenance and quality**: `quality_flags` (packed uint16: distance source, Teff source, photometry source, validity and review bits), `astrometry_quality` (e.g. fractional parallax error or Bailer-Jones interval width; finite, no inf).
 
 See `OUTPUT_COLS` in `foundinspace.pipeline.constants` for the full list.
 
@@ -41,7 +41,7 @@ Entry point: **`fis-pipeline`** (or `python -m foundinspace.pipeline`).
 
 For each batch of Gaia data the pipeline:
 
-1. **Astrometry** (`gaia.astrometry.select_astrometry_gaia`) — Chooses the best distance/position from Gaia DR3 parallax or Bailer-Jones geometric/photogeometric distances; sets `*_use_*` columns and propagates to J2016.0.
+1. **Astrometry** (`gaia.astrometry.select_astrometry_gaia`) — Multi-tier distance: Tier A = best of DR3 / BJ geometric / BJ photogeometric (quality-tested); Tier B = weak catalog fallback; Tier C = photometric (M_G + A_G); Tier D = synthetic prior. Sets `distance_use_pc`, `quality_flags`, `*_use_*` columns. No row dropped for bad astrometry alone.
 2. **Photometry** (`gaia.photometry.assign_photometry_gaia`, `compute_mag_abs_gaia`, `compute_teff_gaia`) — Apparent magnitude (G), absolute magnitude (GSP-Phot / extinction-corrected / distance-modulus cascade), and effective temperature (spectroscopic → BP–RP → B–V → default).
 3. **Coordinates** (`common.coords.calculate_coordinates_fast`) — Propagates positions to J2016.0 using proper motions (no radial velocity) and computes `x_icrs_pc`, `y_icrs_pc`, `z_icrs_pc`, plus `ra_deg`, `dec_deg`, `r_pc`.
 4. **Morton code** (`common.morton.add_morton_code`) — 64-bit 3D Morton code from Cartesian coordinates (cube ±200 000 pc, 21 bits per axis).
@@ -54,7 +54,7 @@ Result columns are trimmed to `OUTPUT_COLS` and written as compressed Parquet (z
 src/foundinspace/
   pipeline/
     cli.py              # Click root; lazy subcommand "gaia"
-    constants.py        # CANONICAL_EPOCH_JYEAR, OUTPUT_COLS, Teff/quality constants
+    constants.py        # OUTPUT_COLS, quality_flags (DIST_SRC_*, TEFF_SRC_*, PHOT_SRC_*, FLAG_*), qf_* accessors
     __main__.py         # python -m entry
     common/
       coords.py         # calculate_coordinates, calculate_coordinates_fast (ICRS → x,y,z at J2016.0)
@@ -75,7 +75,7 @@ Hipparcos modules (`hipparcos.astrometry`, `hipparcos.photometry`) provide HIP-o
 ## Key functions
 
 - **`calculate_coordinates`** / **`calculate_coordinates_fast`** (`common.coords`) — Propagate ICRS positions to J2016.0 and add `x_icrs_pc`, `y_icrs_pc`, `z_icrs_pc`, `ra_deg`, `dec_deg`, `r_pc`. The fast version uses pure NumPy (no Astropy) and assumes no radial velocity.
-- **`select_astrometry_gaia`** (`gaia.astrometry`) — Best of DR3 parallax, Bailer-Jones geometric, and photogeometric; populates `distance_use_pc` and all `*_use_*` astrometry columns.
+- **`select_astrometry_gaia`** (`gaia.astrometry`) — Four-tier distance selection (primary → weak catalog → photometric → synthetic prior) with `quality_flags` (uint16) and finite `astrometry_quality`; populates `distance_use_pc` and all `*_use_*` astrometry columns.
 - **`assign_photometry_gaia`** / **`compute_mag_abs_gaia`** / **`compute_teff_gaia`** (`gaia.photometry`) — Gaia G mag, absolute magnitude cascade, and Teff cascade (spectroscopic → BP–RP → B–V → 5800 K default).
 - **`add_morton_code`** (`common.morton`) — Adds `morton_code` from `x_icrs_pc`, `y_icrs_pc`, `z_icrs_pc` (cube ±200 000 pc).
 
