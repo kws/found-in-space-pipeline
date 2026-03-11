@@ -10,14 +10,25 @@ import numpy as np
 import pandas as pd
 
 from foundinspace.pipeline.common.photometry import bv_to_teff
-from foundinspace.pipeline.constants import PHOTOMETRY_QUALITY_DM_FACTOR, TEFF_DEFAULT_K
+from foundinspace.pipeline.constants import (
+    PHOT_SRC_HIP_HP,
+    PHOT_SRC_SHIFT,
+    PHOTOMETRY_QUALITY_DM_FACTOR,
+    TEFF_DEFAULT_K,
+    TEFF_SRC_BV,
+    TEFF_SRC_DEFAULT,
+    TEFF_SRC_SHIFT,
+)
 
 
 def assign_photometry_hip(df: pd.DataFrame) -> pd.DataFrame:
-    """HIP-only: mag = Hpmag, photometry_method = Hip_Hp, color = bv."""
+    """HIP-only: mag = Hpmag, color = bv; OR phot_src into quality_flags."""
     df["mag"] = df["Hpmag"].astype(float)
-    df["photometry_method"] = "Hip_Hp"
     df["color"] = df["bv"].astype(float)
+    flags = df.get("quality_flags", pd.Series(0, index=df.index)).astype(np.uint16)
+    df["quality_flags"] = (flags | (PHOT_SRC_HIP_HP << PHOT_SRC_SHIFT)).astype(
+        np.uint16
+    )
     return df
 
 
@@ -27,7 +38,6 @@ def compute_mag_abs_hip(df: pd.DataFrame) -> pd.DataFrame:
     mag = df["mag"].astype(float)
     dm = np.where(r_pc > 0, 5 * np.log10(r_pc / 10), np.nan)
     df["mag_abs"] = mag - dm
-    df["photometry_method"] = "Hip_Hp"
     f_hip = df["e_Plx"].astype(float) / np.maximum(df["Plx"].astype(float), 1e-12)
     df["photometry_quality"] = PHOTOMETRY_QUALITY_DM_FACTOR * np.where(
         np.isfinite(f_hip), f_hip, np.nan
@@ -36,7 +46,7 @@ def compute_mag_abs_hip(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def compute_teff_hip(df: pd.DataFrame) -> pd.DataFrame:
-    """HIP-only: bv_to_teff and default only."""
+    """HIP-only: bv_to_teff and default only. OR teff_src into quality_flags."""
     bv = df.get("bv", pd.Series(np.nan, index=df.index)).astype(float)
     has_bv = pd.notnull(bv) & np.isfinite(bv)
     teff_from_bv = bv_to_teff(bv.to_numpy())
@@ -46,6 +56,9 @@ def compute_teff_hip(df: pd.DataFrame) -> pd.DataFrame:
         TEFF_DEFAULT_K,
         df["teff"],
     )
+    teff_src_bits = np.where(has_bv, TEFF_SRC_BV, TEFF_SRC_DEFAULT).astype(np.uint16)
+    flags = df.get("quality_flags", pd.Series(0, index=df.index)).astype(np.uint16)
+    df["quality_flags"] = (flags | (teff_src_bits << TEFF_SRC_SHIFT)).astype(np.uint16)
     return df
 
 
