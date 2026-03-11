@@ -52,7 +52,6 @@ def test_astrometry_adds_required_columns():
         "pmra_use_masyr",
         "pmdec_use_masyr",
         "epoch_yr",
-        "plx_mas",
     ):
         assert col in out.columns, f"missing {col}"
 
@@ -122,8 +121,8 @@ def test_tier_b_weak_catalog_when_all_primary_invalid():
     assert out["distance_use_pc"].iloc[0] == 300.0
     flags = out["quality_flags"].iloc[0]
     assert qf_dist_src(flags) == DIST_SRC_PHOTOGEO_WEAK
-    assert not qf_dist_valid(flags)
-    assert qf_needs_review(flags)
+    assert qf_dist_valid(flags)  # usable distance (any tier)
+    assert qf_needs_review(flags)  # fallback, not primary
     assert out["astrometry_quality"].iloc[0] == 10.0  # QUALITY_FALLBACK_CATALOG
     assert np.isfinite(out["astrometry_quality"].iloc[0])
 
@@ -147,7 +146,7 @@ def test_tier_b_dr3_weak_positive_parallax_only():
     # 1000/0.5 = 2000 pc
     assert out["distance_use_pc"].iloc[0] == 2000.0
     assert qf_dist_src(out["quality_flags"].iloc[0]) == DIST_SRC_DR3_WEAK
-    assert not qf_dist_valid(out["quality_flags"].iloc[0])
+    assert qf_dist_valid(out["quality_flags"].iloc[0])  # usable distance
 
 
 def test_tier_c_photometric_distance():
@@ -166,7 +165,7 @@ def test_tier_c_photometric_distance():
     expected = 10.0 ** ((10.0 - 0.5 - 5.0 + 5.0) / 5.0)
     assert np.isclose(out["distance_use_pc"].iloc[0], expected)
     assert qf_dist_src(out["quality_flags"].iloc[0]) == DIST_SRC_PHOTO_MG_AG
-    assert not qf_dist_valid(out["quality_flags"].iloc[0])
+    assert qf_dist_valid(out["quality_flags"].iloc[0])  # usable distance
     assert out["astrometry_quality"].iloc[0] == 20.0  # QUALITY_FALLBACK_PHOTOMETRIC
 
 
@@ -182,6 +181,7 @@ def test_tier_d_synthetic_prior():
     )
     out = select_astrometry_gaia(df)
     assert qf_dist_src(out["quality_flags"].iloc[0]) == DIST_SRC_PRIOR
+    assert qf_dist_valid(out["quality_flags"].iloc[0])  # usable distance
     assert out["distance_use_pc"].iloc[0] > 0
     assert np.isfinite(out["distance_use_pc"].iloc[0])
     assert out["astrometry_quality"].iloc[0] == 50.0  # QUALITY_SYNTHETIC

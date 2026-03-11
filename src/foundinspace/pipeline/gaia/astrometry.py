@@ -194,8 +194,8 @@ def select_astrometry_gaia(df: pd.DataFrame) -> pd.DataFrame:
     distance[any_valid] = dist_a[any_valid]
     source[any_valid] = src_a_names[any_valid]
     quality[any_valid] = score_a[any_valid]
-    dist_valid[any_valid] = True
-    review[any_valid] = False
+    review[any_valid] = False  # Tier A = trusted primary; B/C/D keep needs_review
+    dist_valid = np.isfinite(distance) & (distance > 0)  # usable distance (any tier)
 
     # quality_flags: dist_src + status bits (phot_src OR'd in by assign_photometry_gaia)
     dist_src_bits = np.full(n, DIST_SRC_UNKNOWN, dtype=np.uint16)
@@ -236,7 +236,6 @@ def select_astrometry_gaia(df: pd.DataFrame) -> pd.DataFrame:
     df["dec_use_deg"] = df["dec"].astype(float)
     df["pmra_use_masyr"] = df["pmra"].astype(float)
     df["pmdec_use_masyr"] = df["pmdec"].astype(float)
-    df["plx_mas"] = np.where(distance > 0, 1000.0 / distance, np.nan)
     df["epoch_yr"] = CANONICAL_EPOCH_JYEAR
 
     return df

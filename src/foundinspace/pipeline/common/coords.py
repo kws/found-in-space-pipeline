@@ -34,8 +34,7 @@ def calculate_coordinates(df: pd.DataFrame) -> pd.DataFrame:
 
     Args:
         df: Output of filter_positional() or assign_photometry() (must have ra_use_deg, dec_use_deg,
-            distance_use_pc, pmra_use_masyr, pmdec_use_masyr, epoch_yr,
-            plx_use_mas, best_source for Bailer-Jones r_lo_pc/r_hi_pc).
+            distance_use_pc, pmra_use_masyr, pmdec_use_masyr, epoch_yr).
 
     Returns:
         New DataFrame with coordinate columns added.

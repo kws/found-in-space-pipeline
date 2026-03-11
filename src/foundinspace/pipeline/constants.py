@@ -43,8 +43,8 @@ TEFF_SRC_SHIFT = 4
 TEFF_SRC_MASK = 0x0070
 
 # status bits (bits 7-9)
-FLAG_DIST_VALID = 0x0080  # bit 7
-FLAG_NEEDS_REVIEW = 0x0100  # bit 8
+FLAG_DIST_VALID = 0x0080  # bit 7: has usable (finite positive) distance
+FLAG_NEEDS_REVIEW = 0x0100  # bit 8: fallback tier (B/C/D), not trusted primary
 FLAG_DIST_PLAUSIBLE = 0x0200  # bit 9
 
 # bits 10-11: phot_src
@@ -71,7 +71,7 @@ def qf_phot_src(flags):
 
 
 def qf_dist_valid(flags):
-    """True if distance is from a quality-tested primary source (Tier A)."""
+    """True if row has a usable distance (finite positive distance_use_pc; any tier)."""
     return (flags & FLAG_DIST_VALID) != 0
 
 

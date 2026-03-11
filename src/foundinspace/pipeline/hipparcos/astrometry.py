@@ -39,7 +39,6 @@ def select_astrometry_hip(df: pd.DataFrame) -> pd.DataFrame:
         | np.where(plaus, FLAG_DIST_PLAUSIBLE, 0).astype(np.uint16)
     )
     df["quality_flags"] = flags
-    df["plx_use_mas"] = 1000.0 / df["r_med_best"]
     df["ra_use_deg"] = df["ra_deg"].astype(float)
     df["dec_use_deg"] = df["dec_deg"].astype(float)
     df["pmra_use_masyr"] = df["pmRA"].astype(float)
