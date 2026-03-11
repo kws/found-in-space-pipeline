@@ -104,14 +104,30 @@ def test_compute_mag_abs_gaia_photometry_quality_finite():
     assert not np.isinf(out["photometry_quality"].iloc[0])
 
 
+def test_compute_mag_abs_gaia_photometry_quality_reversed_bounds_non_negative():
+    """When GSP-Phot bounds are reversed (upper < lower), photometry_quality is still non-negative."""
+    df = _gaia_after_astrometry(
+        phot_g_mean_mag=14.0,
+        bp_rp=0.5,
+        mg_gspphot=5.0,
+        ag_gspphot=0.3,
+        mg_gspphot_upper=4.8,  # reversed: upper < lower
+        mg_gspphot_lower=5.2,
+    )
+    df = assign_photometry_gaia(df)
+    out = compute_mag_abs_gaia(df)
+    # quality_gspphot = abs(upper - lower) / 2 = abs(4.8 - 5.2) / 2 = 0.2
+    assert out["photometry_quality"].iloc[0] >= 0.0
+    assert np.isclose(out["photometry_quality"].iloc[0], 0.2)
+
+
 def test_compute_teff_gaia_adds_teff_src_to_quality_flags():
-    """compute_teff_gaia sets teff, teff_source, and ORs teff_src into quality_flags."""
+    """compute_teff_gaia sets teff and ORs teff_src into quality_flags."""
     df = _gaia_after_astrometry(bp_rp=0.6, bv=np.nan)
     df = assign_photometry_gaia(df)
     # No Gaia spectroscopic Teff columns -> cascade to bp_rp or default
     out = compute_teff_gaia(df)
     assert "teff" in out.columns
-    assert "teff_source" in out.columns
     assert out["teff"].iloc[0] >= 1000 and out["teff"].iloc[0] <= 50000
     teff_src = qf_teff_src(out["quality_flags"].iloc[0])
     # Should be TEFF_SRC_BPRP or TEFF_SRC_DEFAULT
@@ -125,7 +141,6 @@ def test_compute_teff_gaia_gspphot_wins_when_valid():
     df = assign_photometry_gaia(df)
     out = compute_teff_gaia(df)
     assert out["teff"].iloc[0] == 5500.0
-    assert out["teff_source"].iloc[0] == "teff_gspphot"
     assert qf_teff_src(out["quality_flags"].iloc[0]) == TEFF_SRC_GSPPHOT
 
 
@@ -148,7 +163,6 @@ def test_compute_teff_gaia_default_fallback():
     df = assign_photometry_gaia(df)
     out = compute_teff_gaia(df)
     assert out["teff"].iloc[0] == TEFF_DEFAULT_K
-    assert out["teff_source"].iloc[0] == "default"
     assert qf_teff_src(out["quality_flags"].iloc[0]) == TEFF_SRC_DEFAULT
 
 
@@ -161,7 +175,7 @@ def test_compute_teff_gaia_bv_fallback():
     out = compute_teff_gaia(df)
     assert (
         out["teff"].iloc[0] != TEFF_DEFAULT_K
-        or out["teff_source"].iloc[0] == "teff_from_b_v"
+        or qf_teff_src(out["quality_flags"].iloc[0]) == TEFF_SRC_BV
     )
     assert qf_teff_src(out["quality_flags"].iloc[0]) in (TEFF_SRC_BV, TEFF_SRC_DEFAULT)
 

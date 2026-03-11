@@ -38,15 +38,15 @@ def compute_teff_gaia(work: pd.DataFrame) -> pd.DataFrame:
     4. Default: 5800 K (solar-type).
 
     Columns added:
-        teff        : effective temperature (K)
-        teff_source : label identifying which cascade level was used (for debugging)
+        teff : effective temperature (K). Which cascade level was used is encoded in
+               quality_flags (bits 4-6; see qf_teff_src).
 
     Args:
         work: Working DataFrame (must have columns for Gaia Teff, bp_rp, bv as
               available; missing columns are treated as all-NaN).
 
     Returns:
-        New DataFrame with teff and teff_source added.
+        New DataFrame with teff added and quality_flags updated with teff_src (bits 4-6).
     """
 
     def _valid_teff(series: pd.Series) -> pd.Series:
@@ -129,46 +129,31 @@ def compute_teff_gaia(work: pd.DataFrame) -> pd.DataFrame:
         teff_final,
     )
 
-    work["teff_source"] = np.where(
+    work["teff"] = teff_final
+
+    # OR teff_src into quality_flags (bits 4-6)
+    teff_src_vals = np.where(
         has_teff_esphs,
-        "teff_esphs",
+        TEFF_SRC_ESPHS,
         np.where(
             has_teff_gspspec,
-            "teff_gspspec",
+            TEFF_SRC_GSPSPEC,
             np.where(
                 has_teff_espucd,
-                "teff_espucd",
+                TEFF_SRC_ESPUCD,
                 np.where(
                     has_teff_gspphot,
-                    "teff_gspphot",
+                    TEFF_SRC_GSPPHOT,
                     np.where(
                         use_bp_rp,
-                        "teff_from_bp_rp",
-                        np.where(use_bv, "teff_from_b_v", "default"),
+                        TEFF_SRC_BPRP,
+                        np.where(use_bv, TEFF_SRC_BV, TEFF_SRC_DEFAULT),
                     ),
                 ),
             ),
         ),
     )
-    work["teff"] = teff_final
-
-    # OR teff_src into quality_flags (bits 4-6)
-    _teff_src_map = {
-        "default": TEFF_SRC_DEFAULT,
-        "teff_esphs": TEFF_SRC_ESPHS,
-        "teff_gspspec": TEFF_SRC_GSPSPEC,
-        "teff_espucd": TEFF_SRC_ESPUCD,
-        "teff_gspphot": TEFF_SRC_GSPPHOT,
-        "teff_from_bp_rp": TEFF_SRC_BPRP,
-        "teff_from_b_v": TEFF_SRC_BV,
-    }
-    teff_src_vals = (
-        work["teff_source"]
-        .map(_teff_src_map)
-        .fillna(TEFF_SRC_DEFAULT)
-        .astype(np.uint16)
-        .to_numpy()
-    )
+    teff_src_vals = np.asarray(teff_src_vals, dtype=np.uint16)
     flags = work["quality_flags"].astype(np.uint16).to_numpy()
     work["quality_flags"] = (flags | (teff_src_vals << TEFF_SRC_SHIFT)).astype(
         np.uint16
@@ -293,7 +278,7 @@ def compute_mag_abs_gaia(df: pd.DataFrame) -> pd.DataFrame:
         & np.isfinite(mg_upper)
         & np.isfinite(mg_lower)
     )
-    quality_gspphot = np.where(has_bounds, (mg_upper - mg_lower) / 2.0, np.nan)
+    quality_gspphot = np.where(has_bounds, np.abs(mg_upper - mg_lower) / 2.0, np.nan)
 
     used_gspphot = pd.notnull(mag_abs_gspphot) & np.isfinite(mag_abs_gspphot)
     used_ext = ~used_gspphot & pd.notnull(mag_abs_ext) & np.isfinite(mag_abs_ext)
