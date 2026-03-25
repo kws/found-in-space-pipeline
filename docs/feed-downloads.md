@@ -32,6 +32,34 @@ Recommended outputs:
 - `gaia-l3-all-sky-count.csv` (L3 tile counts + manual status).
 - `gaia_batch_plan.csv` (optional: batch assignment for each `hp3`).
 - `gaia_batch_<label>.vot.gz` (one file per Gaia download batch).
+- `gaia_hipparcos2_best_neighbour.ecsv` (Gaia archive cross-match: Gaia `source_id` ↔ Hipparcos HIP).
+
+## Gaia↔Hipparcos cross-match (`hipparcos2_best_neighbour`)
+
+The main Gaia star feed query (above) does **not** include Hipparcos identifiers. The merger instead uses a small sidecar Parquet (`gaia_hip_map.parquet`) built from the Gaia archive table `gaiadr3.hipparcos2_best_neighbour` (~100k rows).
+
+**In this repo:** run `fis-pipeline gaia-to-hip build` (or `download` then `prepare`). Defaults: ECSV under `data/catalogs/`, Parquet at `data/processed/gaia_hip_map.parquet`.
+
+**Standalone TAP recipe** (equivalent to `gaia-to-hip download`):
+
+```python
+from astroquery.gaia import Gaia
+
+QUERY = """
+SELECT
+  source_id,
+  original_ext_source_id,
+  angular_distance,
+  number_of_neighbours
+FROM gaiadr3.hipparcos2_best_neighbour
+"""
+
+job = Gaia.launch_job(QUERY)
+result = job.get_results()
+result.write("gaia_hipparcos2_best_neighbour.ecsv", format="ascii.ecsv", overwrite=True)
+```
+
+`original_ext_source_id` is the Hipparcos-2 source id (the HIP number). Optional columns are kept in the ECSV for provenance; the pipeline sidecar uses only `source_id` and `original_ext_source_id`.
 
 ## Hipparcos workflow
 

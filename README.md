@@ -19,7 +19,7 @@ See `OUTPUT_COLS` in `foundinspace.pipeline.constants` for the full list.
 
 Per-catalog CLIs produce staging Parquet. A future **merge** step (see `docs/mergers.md`) will:
 
-1. Run **Gaia** and **Hipparcos** pipelines on their respective inputs.
+1. Run **Gaia** and **Hipparcos** pipelines on their respective inputs, and build the **Gaia↔HIP** mapping sidecar (`fis-pipeline gaia-to-hip build` or `download` + `prepare`).
 2. Run an **overrides pipeline** that normalizes a versioned **manual overrides** table (e.g. missing objects like the Sun, or replacements where Hipparcos binary solutions are poor).
 3. **Merge** using a cross-match table, quality scoring for Gaia-vs-Hip pairs, with **manual overrides taking precedence** over automatic winners.
 4. Emit a **dense** merged table suitable for Stage 00, optionally **partitioned by HEALPix** (or similar) for efficient downstream octree or spatial queries.
@@ -41,7 +41,10 @@ Entry point: **`fis-pipeline`** (or `python -m foundinspace.pipeline`).
 
 | Command | Description |
 |--------|--------------|
-| `fis-pipeline gaia import INPUT [INPUT ...]` | Read Gaia VOTable(s) (`.vot`, `.vot.gz`, `.vot.xz`), run the Gaia pipeline per batch, write `{stem}.parquet` under `data/processed/gaia` by default (or under `--output-dir`), and emit one Gaia↔HIP mapping sidecar for the command run. |
+| `fis-pipeline gaia import INPUT [INPUT ...]` | Read Gaia VOTable(s) (`.vot`, `.vot.gz`, `.vot.xz`), run the Gaia pipeline per batch, and write `{stem}.parquet` under `data/processed/gaia` by default (or under `--output-dir`). |
+| `fis-pipeline gaia-to-hip download` | Download `gaiadr3.hipparcos2_best_neighbour` from the Gaia archive to ECSV (default: `data/catalogs/gaia_hipparcos2_best_neighbour.ecsv`). |
+| `fis-pipeline gaia-to-hip prepare` | Read that ECSV and write `data/processed/gaia_hip_map.parquet` (Gaia↔HIP sidecar for the merger). |
+| `fis-pipeline gaia-to-hip build` | Run `download` then `prepare` in one step. |
 | `fis-pipeline hip import INPUT` | Read a Hipparcos ECSV file, run the Hipparcos pipeline, and write a deterministic output file (default: `data/processed/hip_stars.parquet`). |
 | `fis-pipeline hip download` | Download Hipparcos New Reduction catalog (`I/311/hip2`) to ECSV (default: `data/catalogs/hip_bright.ecsv`). |
 | `fis-pipeline identifiers download` | Download identifier source catalogs (`I/239/hip_main`, `IV/27A/catalog`, `IV/27A/table3`) to ECSV files in `data/catalogs/`. |
@@ -52,9 +55,10 @@ Entry point: **`fis-pipeline`** (or `python -m foundinspace.pipeline`).
 **Options for `gaia import`:**
 
 - `--output-dir`, `-o` — Directory for Gaia output Parquet files (default: `data/processed/gaia`).
-- `--mapping-output` — Run-level Gaia↔HIP mapping sidecar path (default: `data/processed/gaia_hip_map.parquet`).
 - `--force`, `-f` — Overwrite existing output files.
 - `--mag-limit` — Keep only rows with Gaia G magnitude (`phot_g_mean_mag`) less than or equal to this value.
+
+**Options for `gaia-to-hip download` / `prepare` / `build`:** use `--output` / `-o` for the Parquet sidecar on `prepare` and `build`; `--input` / `-i` on `prepare` for a non-default ECSV; `--download-output` on `build` for a non-default ECSV path. `--force` re-downloads or overwrites outputs as appropriate.
 
 **Options for `hip import`:**
 
@@ -73,7 +77,7 @@ Entry point: **`fis-pipeline`** (or `python -m foundinspace.pipeline`).
 
 By default, the pipeline uses:
 
-- `data/catalogs` for downloaded source catalogs (ECSV).
+- `data/catalogs` for downloaded source catalogs (ECSV), including `gaia_hipparcos2_best_neighbour.ecsv` from `gaia-to-hip download`.
 - `data/processed` for derived Parquet outputs and sidecars, including:
   - Gaia stars in `data/processed/gaia/*.parquet`
   - Gaia↔HIP map at `data/processed/gaia_hip_map.parquet`
@@ -120,7 +124,7 @@ Result columns are trimmed to `OUTPUT_COLS` and written as compressed Parquet (z
 ```
 src/foundinspace/
   pipeline/
-    cli.py              # Click root; lazy subcommands "gaia", "hip", "identifiers", "overrides"
+    cli.py              # Click root; lazy subcommands "gaia", "gaia-to-hip", "hip", "identifiers", "overrides"
     constants.py        # OUTPUT_COLS, quality_flags (DIST_SRC_*, TEFF_SRC_*, PHOT_SRC_*, FLAG_*), qf_* accessors
     __main__.py         # python -m entry
     common/
@@ -129,6 +133,10 @@ src/foundinspace/
     gaia/
       cli.py            # gaia import
       pipeline.py      # Stream VOTable → batches → Parquet (main)
+    gaia_to_hip/
+      cli.py            # gaia-to-hip download, prepare, build
+      download.py      # TAP fetch hipparcos2_best_neighbour → ECSV
+      pipeline.py      # ECSV → gaia_hip_map.parquet
       astrometry.py    # select_astrometry_gaia (DR3 / BJ_GEO / BJ_PHOTOGEO)
       photometry.py    # assign_photometry_gaia, compute_mag_abs_gaia, compute_teff_gaia
     hipparcos/

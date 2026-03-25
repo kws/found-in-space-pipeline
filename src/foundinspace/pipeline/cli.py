@@ -24,6 +24,7 @@ class LazyGroup(click.Group):
     cls=LazyGroup,
     lazy_subcommands={
         "gaia": "foundinspace.pipeline.gaia.cli:cli",
+        "gaia-to-hip": "foundinspace.pipeline.gaia_to_hip.cli:cli",
         "hip": "foundinspace.pipeline.hipparcos.cli:cli",
         "identifiers": "foundinspace.pipeline.identifiers.cli:cli",
         "overrides": "foundinspace.pipeline.overrides.cli:cli",
