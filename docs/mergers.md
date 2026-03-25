@@ -106,7 +106,7 @@ Each override row should carry at least:
 - `action`: `add` | `replace` | `drop` (or equivalent)
 - `override_reason` / category (e.g. `missing_star`, `binary_quality`, `manual_astrometry`)
 - `override_policy_version` (for reproducibility)
-- Keys to match existing rows when applicable: `gaia_source_id` and/or `hip_source_id`
+- Target key to match existing rows: `source` + `source_id` (crossmatch partner lookup is handled by the merger; see "Pair-aware override resolution")
 - For `add` / `replace`: fields required by the merged schema (coordinates, `mag_abs`, etc.) or pointers to a curated row definition
 
 ### Override target key
@@ -135,6 +135,38 @@ Action-specific minimums:
 
 For `drop`, matching is by exact compound key (`source`, `source_id`), and the resolved row is removed from dense output.
 
+### Pair-aware override resolution
+
+Override YAML targets a **single** row by (`source`, `source_id`). The merger resolves overrides at the **matched-pair** level using the crossmatch table (`gaia_hip_map.parquet`):
+
+- If a `replace` or `drop` override targets one side of a crossmatch-linked pair, the **entire pair** is resolved by the override. The partner row from the other catalog is suppressed — it does not appear as an unmatched row or compete in quality scoring.
+- Override authors do **not** need to supply the partner's ID. The crossmatch map already contains the relationship, and requiring manual partner lookups would be error-prone and redundant.
+- The merge decisions sidecar (M5) records both the override action and the suppressed partner, e.g.: "HIP 71683 replaced by `manual.alpha_cen_a.replace.v1`; Gaia counterpart `<gaia_source_id>` suppressed via crossmatch."
+- For `add` overrides (which target `source=manual`), no crossmatch lookup applies — the row is inserted directly.
+
+### Magnitude-limited Gaia subsets and missing crossmatch partners
+
+Gaia data may be imported with a magnitude limit (`--mag-limit`), so a `gaia_source_id` present in the crossmatch table may have **no corresponding row** in the actual Gaia batch files. The merger must handle this gracefully in both override and non-override paths.
+
+**Non-override path (matched pairs with a missing side):**
+
+- If the crossmatch links Gaia X ↔ HIP Y but Gaia X has no row in the Gaia data, the pair is treated as having only one present side. HIP Y becomes an **effectively unmatched** Hipparcos row (kept per M1). No quality scoring or winner selection occurs — there is no competitor.
+- The converse (HIP side missing) is unlikely in practice but follows the same logic: the present Gaia row is kept as unmatched.
+
+**Override path — target present, partner missing:**
+
+- Override targets `source=hip, source_id=Y`. The crossmatch maps Y to Gaia X, but Gaia X was excluded by mag-limit. The override applies normally to the HIP row. There is no Gaia partner to suppress — this is not an error.
+
+**Override path — target missing, partner present:**
+
+- Override targets `source=gaia, source_id=X`, but X was excluded by mag-limit. The crossmatch maps X to HIP Y, which **does** exist. The merger must still resolve the pair: the override payload replaces or drops as specified, and HIP Y is suppressed. The override is not silently skipped just because its literal target catalog row is absent.
+
+**Override path — neither side present:**
+
+- Override targets a row where both the target and any crossmatch partner are absent from the loaded data. The merger emits a **warning** (the override has no effect) and records this in the merge decisions sidecar. This is not a fatal error — it can happen legitimately with aggressive magnitude filtering.
+
+**Implementation requirement:** For every `replace` or `drop` override, the merger must look up the crossmatch table to find a partner on **either** side, then check which (if any) of the two rows actually exist in the loaded Gaia and HIP data. The override resolves whichever rows are present; missing rows are noted but do not block the override.
+
 ---
 
 ## Canonical identity
@@ -146,7 +178,7 @@ Policy (extend as needed; namespaces must be consistent before Stage 00):
 - **Gaia-selected rows**: `source_id = gaia_source_id` (or namespaced equivalent).
 - **Hipparcos-selected rows** without a Gaia counterpart: `source_id = hip_source_id` in the Hipparcos namespace.
 - **Manual-only rows** (`add`): `source_id` in a dedicated namespace (e.g. prefixed or separate ID range) so collisions with Gaia/HIP numeric IDs cannot occur.
-- **Replaced rows**: canonical `source_id` follows policy (typically retain the primary catalog id used for serving; document in override row).
+- **Replaced rows**: canonical `source_id` is always the **original target's** `source` / `source_id`. The override swaps the payload (coordinates, photometry, etc.) but does not remap identity.
 
 `catalog_source` on the dense row indicates the **provenance of the chosen astrometry/photometry** for that row: `gaia`, `hip`, or `manual` (or equivalent enum).
 
@@ -156,9 +188,9 @@ Policy (extend as needed; namespaces must be consistent before Stage 00):
 
 ### Definitions
 
-- **Matched pair**: one Gaia row and one Hipparcos row linked by cross-match.
-- **Unmatched Gaia**: Gaia row not present in cross-match.
-- **Unmatched Hipparcos**: Hipparcos row not present in cross-match.
+- **Matched pair**: one Gaia row and one Hipparcos row linked by cross-match, where **both rows exist** in the loaded data. A crossmatch link where one side was excluded (e.g. by Gaia magnitude filtering) does not form a matched pair — the present row is treated as unmatched.
+- **Unmatched Gaia**: Gaia row not present in any matched pair (either no crossmatch link, or the HIP partner is missing from the data).
+- **Unmatched Hipparcos**: Hipparcos row not present in any matched pair (either no crossmatch link, or the Gaia partner is missing from the data).
 
 ### Rules
 
@@ -195,17 +227,29 @@ Recommend a dedicated **merge decisions** sidecar (Parquet or JSONL) rather than
 
 ## Quality scoring contract
 
-The exact scoring formula is configurable, but the merger must expose:
+### Policy v1: `astrometry_quality` comparison
 
-- versioned quality policy identifier
+Both the Gaia and Hipparcos pipelines produce `astrometry_quality` as a **fractional parallax error** (σ/π): `e_Plx / Plx` for Hipparcos (`hipparcos/astrometry.py`), `parallax_error / max(parallax, ε)` for Gaia DR3 (`gaia/astrometry.py`). For Bailer-Jones distances the analogous half-interval width is used. These values are directly comparable across catalogs: **lower is better**.
+
+Gaia fallback tiers already carry sentinel quality values that sort correctly against real measurements:
+
+- Tier A (primary): actual fractional error (typically < 1.0)
+- Tier B (weak catalog fallback): `10.0`
+- Tier C (photometric distance): `20.0`
+- Tier D (synthetic prior): `50.0`
+
+Winner selection for matched pairs (M2):
+
+1. Compare `astrometry_quality` directly. Lower value wins.
+2. If values are equal, apply the deterministic tie-break (M3): prefer Gaia, then lower `source_id`.
+
+This means Hipparcos wins for bright nearby stars where its parallax measurement is more precise than Gaia's, and Gaia wins everywhere else — which is the reason both pipelines compute quality metrics.
+
+The merger must expose:
+
+- versioned quality policy identifier (v1 for this policy)
 - deterministic numeric score per candidate
 - reproducible output for the same input tables
-
-Example signals (non-normative):
-
-- parallax uncertainty metrics
-- astrometric fit quality
-- photometric quality flags
 
 ---
 
@@ -282,17 +326,15 @@ Merger run should produce:
 
 ---
 
-## Open decisions before implementation
+## Resolved decisions
 
-The following are still intentionally unresolved and should be fixed before coding the first merger implementation:
+The following were resolved before the first merger implementation:
 
-1. **Matched-pair winner policy version 1**
-   - Confirm whether v1 defaults to "prefer Gaia for matched pairs unless an override intervenes", or
-   - v1 must compute a full Gaia-vs-Hip quality score for every matched pair.
+1. **Matched-pair winner policy v1** — Compare `astrometry_quality` directly (lower wins). Both pipelines produce comparable fractional parallax error; Gaia fallback-tier sentinels (10/20/50) sort correctly against real measurements. Tie-break: prefer Gaia, then lower `source_id`. See "Quality scoring contract" above for details.
 
-2. **Canonical identity for `replace` actions**
-   - Confirm whether replacement rows always retain the original target canonical `source_id`, or
-   - can remap canonical identity (if so, document strict allowed cases).
+2. **Canonical identity for `replace` actions** — Replacement rows always retain the original target's `source` / `source_id` as canonical identity. The override swaps the payload only; identity is never remapped.
+
+3. **Override pair resolution** — Overrides target a single (`source`, `source_id`) key. When the target is one side of a crossmatch-linked pair, the merger resolves the entire pair via the crossmatch table; the partner is suppressed. Override authors do not supply partner IDs. When Gaia data is magnitude-limited, the merger handles missing crossmatch partners gracefully — an override still applies if either side of the pair exists in the data. See "Pair-aware override resolution" and "Magnitude-limited Gaia subsets" above.
 
 ---
 

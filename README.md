@@ -19,7 +19,7 @@ See `OUTPUT_COLS` in `foundinspace.pipeline.constants` for the full list.
 
 Per-catalog CLIs produce staging Parquet. A future **merge** step (see `docs/mergers.md`) will:
 
-1. Run **Gaia** and **Hipparcos** pipelines on their respective inputs, and build the **Gaia↔HIP** mapping sidecar (`fis-pipeline gaia-to-hip build` or `download` + `prepare`).
+1. Run **Gaia** and **Hipparcos** pipelines on their respective inputs, and build the **Gaia↔HIP** mapping sidecar (`fis-pipeline gaia-to-hip build` or `download` + `prepare`; Hipparcos also supports `fis-pipeline hip build`).
 2. Run an **overrides pipeline** that normalizes a versioned **manual overrides** table (e.g. missing objects like the Sun, or replacements where Hipparcos binary solutions are poor).
 3. **Merge** using a cross-match table, quality scoring for Gaia-vs-Hip pairs, with **manual overrides taking precedence** over automatic winners.
 4. Emit a **dense** merged table suitable for Stage 00, optionally **partitioned by HEALPix** (or similar) for efficient downstream octree or spatial queries.
@@ -45,8 +45,9 @@ Entry point: **`fis-pipeline`** (or `python -m foundinspace.pipeline`).
 | `fis-pipeline gaia-to-hip download` | Download `gaiadr3.hipparcos2_best_neighbour` from the Gaia archive to ECSV (default: `data/catalogs/gaia_hipparcos2_best_neighbour.ecsv`). |
 | `fis-pipeline gaia-to-hip prepare` | Read that ECSV and write `data/processed/gaia_hip_map.parquet` (Gaia↔HIP sidecar for the merger). |
 | `fis-pipeline gaia-to-hip build` | Run `download` then `prepare` in one step. |
-| `fis-pipeline hip import INPUT` | Read a Hipparcos ECSV file, run the Hipparcos pipeline, and write a deterministic output file (default: `data/processed/hip_stars.parquet`). |
-| `fis-pipeline hip download` | Download Hipparcos New Reduction catalog (`I/311/hip2`) to ECSV (default: `data/catalogs/hip_bright.ecsv`). |
+| `fis-pipeline hip prepare` | Read a Hipparcos ECSV file, run the Hipparcos pipeline, and write a deterministic output file (default input: `data/catalogs/hipparcos2.ecsv`; default output: `data/processed/hip_stars.parquet`). |
+| `fis-pipeline hip download` | Download Hipparcos New Reduction catalog (`I/311/hip2`) to ECSV (default: `data/catalogs/hipparcos2.ecsv`). |
+| `fis-pipeline hip build` | Run `hip download` (download-if-needed) then `hip prepare` in one step. |
 | `fis-pipeline identifiers download` | Download identifier source catalogs (`I/239/hip_main`, `IV/27A/catalog`, `IV/27A/table3`) to ECSV files in `data/catalogs/`. |
 | `fis-pipeline identifiers prepare` | Build a wide identifiers sidecar parquet keyed by `hip_source_id` (default: `data/processed/identifiers_map.parquet`). |
 | `fis-pipeline identifiers build` | Run `identifiers download` then `identifiers prepare` in one command. |
@@ -60,8 +61,10 @@ Entry point: **`fis-pipeline`** (or `python -m foundinspace.pipeline`).
 
 **Options for `gaia-to-hip download` / `prepare` / `build`:** use `--output` / `-o` for the Parquet sidecar on `prepare` and `build`; `--input` / `-i` on `prepare` for a non-default ECSV; `--download-output` on `build` for a non-default ECSV path. `--force` re-downloads or overwrites outputs as appropriate.
 
-**Options for `hip import`:**
+**Options for `hip prepare` / `hip build`:**
 
+- `--input`, `-i` (`hip prepare`) — Hipparcos ECSV input path (default: `data/catalogs/hipparcos2.ecsv`).
+- `--download-output` (`hip build`) — ECSV path for the download step (default: `data/catalogs/hipparcos2.ecsv`).
 - `--output`, `-o` — Hipparcos output path (default: `data/processed/hip_stars.parquet`).
 - `--force`, `-f` — Overwrite existing output files.
 - `--limit`, `-l` — Stop after this many output rows (for testing).
@@ -77,7 +80,7 @@ Entry point: **`fis-pipeline`** (or `python -m foundinspace.pipeline`).
 
 By default, the pipeline uses:
 
-- `data/catalogs` for downloaded source catalogs (ECSV), including `gaia_hipparcos2_best_neighbour.ecsv` from `gaia-to-hip download`.
+- `data/catalogs` for downloaded source catalogs (ECSV), including `gaia_hipparcos2_best_neighbour.ecsv` from `gaia-to-hip download` and `hipparcos2.ecsv` from `hip download`.
 - `data/processed` for derived Parquet outputs and sidecars, including:
   - Gaia stars in `data/processed/gaia/*.parquet`
   - Gaia↔HIP map at `data/processed/gaia_hip_map.parquet`
@@ -140,7 +143,7 @@ src/foundinspace/
       astrometry.py    # select_astrometry_gaia (DR3 / BJ_GEO / BJ_PHOTOGEO)
       photometry.py    # assign_photometry_gaia, compute_mag_abs_gaia, compute_teff_gaia
     hipparcos/
-      cli.py           # hip download, hip import
+      cli.py           # hip download, hip prepare, hip build
       download.py      # fetch Hipparcos ECSV from Vizier
       pipeline.py      # ECSV -> Hipparcos transforms -> parquet
       astrometry.py    # select_astrometry_hip (Hipparcos-only)
@@ -155,7 +158,7 @@ src/foundinspace/
       pipeline.py      # YAML → overrides.parquet for merger
 ```
 
-Hipparcos pipeline is available via `fis-pipeline hip import` for ECSV inputs.
+Hipparcos pipeline is available via `fis-pipeline hip prepare` (or one-step `fis-pipeline hip build`).
 
 ## Key functions
 

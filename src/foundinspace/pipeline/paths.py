@@ -16,6 +16,7 @@ PROCESSED_DIR = Path(config("FIS_PROCESSED_DIR", default="data/processed")).expa
 
 # Gaia↔Hipparcos cross-match raw download (Gaia archive TAP).
 GAIA_HIP_BEST_NEIGHBOUR_ECSV = CATALOGS_DIR / "gaia_hipparcos2_best_neighbour.ecsv"
+HIPPARCOS2_ECSV = CATALOGS_DIR / "hipparcos2.ecsv"
 
 # Source-aware processed defaults.
 PROCESSED_GAIA_DIR = PROCESSED_DIR / "gaia"

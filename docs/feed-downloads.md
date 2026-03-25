@@ -24,7 +24,7 @@ python -m pip install astroquery astropy pandas numpy
 
 Recommended outputs:
 
-- `hip_bright.ecsv` (Hipparcos raw catalog).
+- `hipparcos2.ecsv` (Hipparcos raw catalog).
 - `hip_hd.ecsv` (HIP→HD from `I/239/hip_main`).
 - `iv27a_catalog.ecsv` (`HIP`, `HD`, `Bayer`, `Fl`, `Cst` from `IV/27A/catalog`).
 - `iv27a_proper_names.ecsv` (`HD`→proper names from `IV/27A/table3`).
@@ -63,6 +63,8 @@ result.write("gaia_hipparcos2_best_neighbour.ecsv", format="ascii.ecsv", overwri
 
 ## Hipparcos workflow
 
+**In this repo:** run `fis-pipeline hip build` (or `hip download` then `hip prepare`).
+
 ## 1) Download Hipparcos
 
 ```python
@@ -71,7 +73,7 @@ from astroquery.vizier import Vizier
 v = Vizier(columns=["*"], row_limit=-1)
 tables = v.get_catalogs("I/311/hip2")  # Hipparcos New Reduction
 hip_table = tables[0]
-hip_table.write("hip_bright.ecsv", format="ascii.ecsv", overwrite=True)
+hip_table.write("hipparcos2.ecsv", format="ascii.ecsv", overwrite=True)
 print(f"saved {len(hip_table):,} rows")
 ```
 

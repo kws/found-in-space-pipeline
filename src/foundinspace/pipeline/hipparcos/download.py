@@ -6,10 +6,11 @@ from pathlib import Path
 
 import click
 from astroquery.vizier import Vizier
-from foundinspace.pipeline.paths import CATALOGS_DIR
+from foundinspace.pipeline.paths import HIPPARCOS2_ECSV
 
 VIZIER_CATALOG = "I/311/hip2"
-DEFAULT_OUTPUT = CATALOGS_DIR / "hip_bright.ecsv"
+DEFAULT_OUTPUT = HIPPARCOS2_ECSV
+LEGACY_DEFAULT_OUTPUT = DEFAULT_OUTPUT.parent / "hip_bright.ecsv"
 
 
 def fetch_hipparcos_to_ecsv(output_path: Path, *, overwrite: bool = False) -> Path:
@@ -42,6 +43,15 @@ def ensure_hipparcos_ecsv(
     """
     path = Path(output_path) if output_path is not None else DEFAULT_OUTPUT
     path = path.expanduser()
+
+    # Backward-compatible default: reuse the prior on-disk name if present.
+    if (
+        not force
+        and path == DEFAULT_OUTPUT
+        and not path.exists()
+        and LEGACY_DEFAULT_OUTPUT.exists()
+    ):
+        return LEGACY_DEFAULT_OUTPUT
 
     if path.exists() and not force:
         if not path.is_file():
