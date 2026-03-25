@@ -1,0 +1,69 @@
+description: >
+  Manual overrides for the Alpha Centauri system. Distances for Alpha Cen A/B
+  are pinned to a system-level binary solution rather than per-component Gaia/
+  Hipparcos entries. Photometric values preserve source-specific quality flags.
+
+stars:
+  - override_id: manual.alpha_cen_a.override.v1
+    action: override
+    source: alpha_cen_system
+    source_id: alf_cen_a
+    override_reason: binary_astrometry_photometry
+    override_policy_version: kervella2016_v1
+
+    ra_deg: 219.9020583333
+    dec_deg: -60.8339926944
+    r_pc: 1.3383835004
+
+    mag_abs: 4.3771
+    teff: 5792
+
+    position_ref: "SIMBAD coord, van Leeuwen 2007"
+    distance_ref: "Kervella et al. 2016/2017 system parallax"
+    photometry_ref: "SIMBAD V photometry, Ducati 2002"
+    photometry_band: "Johnson V"
+    photometry_quality: "C"
+    photometry_value: 0.01
+
+  - override_id: manual.alpha_cen_b.override.v1
+    action: override
+    source: alpha_cen_system
+    source_id: alf_cen_b
+    override_reason: binary_astrometry_photometry
+    override_policy_version: kervella2016_v1
+
+    ra_deg: 219.8960962917
+    dec_deg: -60.8375275556
+    r_pc: 1.3383835004
+
+    mag_abs: 5.6971
+    teff: 5231
+
+    position_ref: "SIMBAD coord, van Leeuwen 2007"
+    distance_ref: "Kervella et al. 2016/2017 system parallax"
+    photometry_ref: "SIMBAD V photometry, Ducati 2002"
+    photometry_band: "Johnson V"
+    photometry_quality: "C"
+    photometry_value: 1.33
+
+  - override_id: manual.proxima_cen.override.v1
+    action: override
+    source: gaia_dr3_plus_photometry
+    source_id: proxima_cen
+    override_reason: variable_star_manual_quality_annotation
+    override_policy_version: gaia_dr3_v1
+
+    ra_deg: 217.4289422216
+    dec_deg: -62.6794901891
+    r_pc: 1.3019705976
+
+    mag_abs: 15.5570
+    teff: 2980
+
+    position_ref: "SIMBAD coord/parallax, Gaia DR3"
+    distance_ref: "Gaia DR3 parallax via SIMBAD"
+    photometry_ref: "SIMBAD V photometry, Jao et al. 2014"
+    photometry_band: "Johnson V"
+    photometry_quality: "D"
+    photometry_value: 11.13
+    photometry_note: "Variable flare star; fixed V is a representative catalogue value, not a constant brightness."
