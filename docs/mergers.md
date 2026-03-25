@@ -34,7 +34,7 @@ This specification does not cover:
 
 Merge runs **after** those three inputs exist and **before** Stage 00:
 
-`gaia parquet + hip parquet + crossmatch + manual_overrides → merged canonical parquet → Stage 00 → Stage 01`
+`gaia parquet set + hip parquet + crossmatch + manual_overrides → merged canonical parquet → Stage 00 → Stage 01`
 
 ### Spatial sharding (after merge, before 3D indexing)
 
@@ -58,7 +58,7 @@ After merge, the combined dataset is written into **2D spatial shards** (recomme
 
 Required:
 
-- Gaia source parquet (or equivalent table), after Gaia pipeline preprocessing
+- Gaia source parquet set (or equivalent table), after Gaia pipeline preprocessing
 - Hipparcos source parquet (or equivalent table), after Hipparcos pipeline preprocessing
 - Cross-match table mapping Gaia `source_id` and Hipparcos `HIP` (or equivalent) for matched pairs
 - **Manual overrides** table (versioned): explicit `add`, `replace`, and optional `drop` / suppress actions (see below)
@@ -67,6 +67,28 @@ Optional:
 
 - Additional identifier tables (HD, Bayer, Flamsteed, etc.) joined **into sidecars**, not necessarily into every row of the dense merge output
 - A provisional Gaia-import mapping sidecar (`gaia_source_id` ↔ `hip_source_id`, when Gaia input includes `hip`) to reduce re-scan cost. This artifact is advisory and can be superseded by merge-time crossmatch/override resolution.
+
+---
+
+## File layout and naming conventions
+
+Use a fixed split between raw catalogs and processed artifacts:
+
+- Raw catalog downloads: `data/catalogs/`
+- Processed artifacts used by merger and downstream stages: `data/processed/`
+
+Within `data/processed/`, current naming policy is deterministic and source-aware:
+
+- Gaia stars: `data/processed/gaia/*.parquet` (one file per Gaia input, wildcard-friendly)
+- Gaia/Hip mapping: `data/processed/gaia_hip_map.parquet` (top level, intentionally **not** under `gaia/`)
+- Hipparcos processed stars: `data/processed/hip_stars.parquet`
+- Identifier mapping sidecar: `data/processed/identifiers_map.parquet`
+
+Rationale:
+
+- Avoid mixing raw downloads with derived artifacts.
+- Keep Gaia multi-file outputs discoverable via wildcard without pulling in non-Gaia files.
+- Keep single-file products deterministic for stable pipeline wiring and easier auditing.
 
 ---
 
@@ -256,6 +278,28 @@ Merger run should produce:
 - Merge report JSON with counts and policy versions (merge policy + override policy)
 - Decision / override audit tables (Parquet recommended)
 - Sparse sidecar Parquet files for identifiers and designations
+
+---
+
+## Open decisions before implementation
+
+The following are still intentionally unresolved and should be fixed before coding the first merger implementation:
+
+1. **Overrides processed artifact shape**
+   - One wide file (for example `overrides.parquet`) containing `action` + payload columns with nullable payload for `drop`; or
+   - Two files (for example `overrides_actions.parquet` + `overrides_stars.parquet`) separating audit/action rows from row payloads.
+
+2. **Overrides deterministic filename(s)**
+   - Confirm final processed output name(s) under `data/processed/` for override-derived artifacts.
+   - A placeholder like `overrides_stars.parquet` is acceptable only if shape and usage are clearly documented.
+
+3. **Matched-pair winner policy version 1**
+   - Confirm whether v1 defaults to "prefer Gaia for matched pairs unless an override intervenes", or
+   - v1 must compute a full Gaia-vs-Hip quality score for every matched pair.
+
+4. **Canonical identity for `replace` actions**
+   - Confirm whether replacement rows always retain the original target canonical `source_id`, or
+   - can remap canonical identity (if so, document strict allowed cases).
 
 ---
 

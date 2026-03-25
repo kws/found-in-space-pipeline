@@ -6,9 +6,10 @@ from pathlib import Path
 
 import click
 from astroquery.vizier import Vizier
+from foundinspace.pipeline.paths import CATALOGS_DIR
 
 VIZIER_CATALOG = "I/311/hip2"
-DEFAULT_OUTPUT = Path("downloads/hip_bright.ecsv")
+DEFAULT_OUTPUT = CATALOGS_DIR / "hip_bright.ecsv"
 
 
 def fetch_hipparcos_to_ecsv(output_path: Path, *, overwrite: bool = False) -> Path:

@@ -70,17 +70,16 @@ def test_main_writes_parquet_with_limit(tmp_path: Path):
 
 def test_cli_import_writes_output(tmp_path: Path):
     input_file = tmp_path / "hip.ecsv"
-    output_dir = tmp_path / "out"
-    output_dir.mkdir()
+    output_file = tmp_path / "out" / "hip_stars.parquet"
     _write_ecsv(_sample_hip_df(), input_file)
 
     runner = CliRunner()
     result = runner.invoke(
         cli,
-        ["import", str(input_file), "--output-dir", str(output_dir), "--limit", "1"],
+        ["import", str(input_file), "--output", str(output_file), "--limit", "1"],
     )
 
     assert result.exit_code == 0
-    out = pd.read_parquet(output_dir / "hip.parquet")
+    out = pd.read_parquet(output_file)
     assert len(out) == 1
     assert out["source"].iloc[0] == "hip"

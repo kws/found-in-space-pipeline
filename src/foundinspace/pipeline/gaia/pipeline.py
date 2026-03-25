@@ -1,4 +1,4 @@
-"""Gaia-only pipeline: stream VOTable -> {input_stem}.parquet (batched, same dir as input).
+"""Gaia-only pipeline: stream VOTable -> {input_stem}.parquet (batched).
 
 Reads Gaia data via votpipe in 500k-row batches, runs Gaia-specific astrometry,
 photometry, filter, coordinates, mag_abs, teff, log_g; appends each non-empty
@@ -135,7 +135,7 @@ def main(
     skip_if_exists: bool = True,
     limit: int | None = None,
 ) -> pd.DataFrame:
-    """Stream input_path (VOTable), run pipeline per batch, write {input_stem}.parquet to same dir."""
+    """Stream input_path (VOTable), run pipeline per batch, write to output_path."""
     if skip_if_exists and output_path.exists():
         print(f"Skipping {input_path} (output exists: {output_path})")
         return empty_gaia_hip_mapping()

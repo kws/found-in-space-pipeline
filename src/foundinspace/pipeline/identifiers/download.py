@@ -6,12 +6,13 @@ from pathlib import Path
 
 import click
 from astroquery.vizier import Vizier
+from foundinspace.pipeline.paths import CATALOGS_DIR
 
 HIP_HD_CATALOG = "I/239/hip_main"
 IV27A_CATALOG = "IV/27A/catalog"
 IV27A_PROPER_NAMES = "IV/27A/table3"
 
-DEFAULT_OUTPUT_DIR = Path("downloads")
+DEFAULT_OUTPUT_DIR = CATALOGS_DIR
 DEFAULT_HIP_HD_OUTPUT = DEFAULT_OUTPUT_DIR / "hip_hd.ecsv"
 DEFAULT_IV27A_CATALOG_OUTPUT = DEFAULT_OUTPUT_DIR / "iv27a_catalog.ecsv"
 DEFAULT_IV27A_PROPER_NAMES_OUTPUT = DEFAULT_OUTPUT_DIR / "iv27a_proper_names.ecsv"

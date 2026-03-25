@@ -9,8 +9,9 @@ from foundinspace.pipeline.identifiers.download import (
     DEFAULT_IV27A_PROPER_NAMES_OUTPUT,
 )
 from foundinspace.pipeline.identifiers.pipeline import prepare_identifiers_sidecar
+from foundinspace.pipeline.paths import IDENTIFIERS_MAP_OUTPUT
 
-DEFAULT_SIDECAR_OUTPUT = Path("downloads/star_identifiers.parquet")
+DEFAULT_SIDECAR_OUTPUT = IDENTIFIERS_MAP_OUTPUT
 
 
 @click.group(name="identifiers")

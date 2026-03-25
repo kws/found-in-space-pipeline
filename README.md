@@ -41,26 +41,44 @@ Entry point: **`fis-pipeline`** (or `python -m foundinspace.pipeline`).
 
 | Command | Description |
 |--------|--------------|
-| `fis-pipeline gaia import INPUT [INPUT ...]` | Read Gaia VOTable(s) (`.vot`, `.vot.gz`, `.vot.xz`), run the Gaia pipeline per batch, write `{stem}.parquet` next to each input (or under `--output-dir`), and emit one Gaia↔HIP mapping sidecar for the command run. |
-| `fis-pipeline hip import INPUT [INPUT ...]` | Read Hipparcos ECSV file(s), run the Hipparcos pipeline, and write `{stem}.parquet` next to each input (or under `--output-dir`). |
-| `fis-pipeline hip download` | Download Hipparcos New Reduction catalog (`I/311/hip2`) to ECSV (default: `downloads/hip_bright.ecsv`). |
-| `fis-pipeline identifiers download` | Download identifier source catalogs (`I/239/hip_main`, `IV/27A/catalog`, `IV/27A/table3`) to ECSV files in `downloads/`. |
-| `fis-pipeline identifiers prepare` | Build a wide identifiers sidecar parquet keyed by `hip_source_id` (default: `downloads/star_identifiers.parquet`). |
+| `fis-pipeline gaia import INPUT [INPUT ...]` | Read Gaia VOTable(s) (`.vot`, `.vot.gz`, `.vot.xz`), run the Gaia pipeline per batch, write `{stem}.parquet` under `data/processed/gaia` by default (or under `--output-dir`), and emit one Gaia↔HIP mapping sidecar for the command run. |
+| `fis-pipeline hip import INPUT` | Read a Hipparcos ECSV file, run the Hipparcos pipeline, and write a deterministic output file (default: `data/processed/hip_stars.parquet`). |
+| `fis-pipeline hip download` | Download Hipparcos New Reduction catalog (`I/311/hip2`) to ECSV (default: `data/catalogs/hip_bright.ecsv`). |
+| `fis-pipeline identifiers download` | Download identifier source catalogs (`I/239/hip_main`, `IV/27A/catalog`, `IV/27A/table3`) to ECSV files in `data/catalogs/`. |
+| `fis-pipeline identifiers prepare` | Build a wide identifiers sidecar parquet keyed by `hip_source_id` (default: `data/processed/identifiers_map.parquet`). |
 | `fis-pipeline identifiers build` | Run `identifiers download` then `identifiers prepare` in one command. |
 
 **Options for `gaia import`:**
 
-- `--output-dir`, `-o` — Directory for output Parquet files (default: same as input).
-- `--mapping-output` — Run-level Gaia↔HIP mapping sidecar path (default: `gaia_hip_map.parquet` in `--output-dir`, or in the common input directory when all inputs share one).
+- `--output-dir`, `-o` — Directory for Gaia output Parquet files (default: `data/processed/gaia`).
+- `--mapping-output` — Run-level Gaia↔HIP mapping sidecar path (default: `data/processed/gaia_hip_map.parquet`).
 - `--force`, `-f` — Overwrite existing output files.
 - `--limit`, `-l` — Stop after this many output rows (for testing).
 
 **Options for `hip import`:**
 
-- `--output-dir`, `-o` — Directory for output Parquet files (default: same as input).
+- `--output`, `-o` — Hipparcos output path (default: `data/processed/hip_stars.parquet`).
 - `--force`, `-f` — Overwrite existing output files.
 - `--limit`, `-l` — Stop after this many output rows (for testing).
 - Input format is currently ECSV only.
+
+### Default storage layout and `.env` overrides
+
+By default, the pipeline uses:
+
+- `data/catalogs` for downloaded source catalogs (ECSV).
+- `data/processed` for derived Parquet outputs and sidecars, including:
+  - Gaia stars in `data/processed/gaia/*.parquet`
+  - Gaia↔HIP map at `data/processed/gaia_hip_map.parquet`
+  - Hipparcos stars at `data/processed/hip_stars.parquet`
+  - Identifiers sidecar at `data/processed/identifiers_map.parquet`
+
+Both roots are configurable via environment variables (for example in a `.env` file):
+
+- `FIS_CATALOGS_DIR` (default: `data/catalogs`)
+- `FIS_PROCESSED_DIR` (default: `data/processed`)
+
+CLI flags still take precedence. Output directories are auto-created as needed.
 
 **Identifiers sidecar schema (`identifiers prepare`)**
 

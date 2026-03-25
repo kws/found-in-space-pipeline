@@ -7,6 +7,7 @@ from foundinspace.pipeline.gaia.pipeline import (
     main,
     write_gaia_hip_mapping,
 )
+from foundinspace.pipeline.paths import GAIA_HIP_MAP_OUTPUT, PROCESSED_GAIA_DIR
 
 
 @click.group(name="gaia")
@@ -21,7 +22,11 @@ def cli():
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
 )
 @click.option(
-    "--output-dir", "-o", type=click.Path(file_okay=False, path_type=Path), default=None
+    "--output-dir",
+    "-o",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=PROCESSED_GAIA_DIR,
+    show_default=True,
 )
 @click.option(
     "--mapping-output",
@@ -33,7 +38,7 @@ def cli():
 @click.option("--limit", "-l", type=int, default=None)
 def import_gaia(
     input_files: list[Path],
-    output_dir: Path | None = None,
+    output_dir: Path = PROCESSED_GAIA_DIR,
     mapping_output: Path | None = None,
     force: bool = False,
     limit: int | None = None,
@@ -42,14 +47,13 @@ def import_gaia(
         click.echo("No input files provided")
         return
 
+    output_root = Path(output_dir).expanduser()
+    output_root.mkdir(parents=True, exist_ok=True)
+
     mapping_output_file = _mapping_output_path_for(
-        input_files=input_files,
-        output_dir=output_dir,
         mapping_output=mapping_output,
     )
-    if not mapping_output_file.parent.exists():
-        click.echo(f"Mapping output directory {mapping_output_file.parent} does not exist")
-        return
+    mapping_output_file.parent.mkdir(parents=True, exist_ok=True)
     if not force and mapping_output_file.exists():
         click.echo(
             f"Mapping output exists and --force not set: {mapping_output_file}"
@@ -59,14 +63,7 @@ def import_gaia(
     mapping_chunks = []
     for input_file in input_files:
         output_name = _output_path_for(input_file)
-        if output_dir is not None:
-            output_file = output_dir / output_name
-        else:
-            output_file = input_file.parent / output_name
-
-        if not output_file.parent.exists():
-            click.echo(f"Output directory {output_file.parent} does not exist")
-            return
+        output_file = output_root / output_name
 
         mapping = main(input_file, output_file, skip_if_exists=not force, limit=limit)
         if not mapping.empty:
@@ -80,7 +77,7 @@ def import_gaia(
 
 
 def _output_path_for(input_path: Path) -> str:
-    """Parquet output path for a given VOTable input (same dir, stem from name)."""
+    """Parquet output filename for a given VOTable input (stem from name)."""
     name_lower = input_path.name.lower()
     if name_lower.endswith(".vot.gz"):
         output_base = input_path.name[: -len(".vot.gz")]
@@ -93,19 +90,8 @@ def _output_path_for(input_path: Path) -> str:
 
 def _mapping_output_path_for(
     *,
-    input_files: list[Path],
-    output_dir: Path | None,
     mapping_output: Path | None,
 ) -> Path:
     if mapping_output is not None:
-        return mapping_output
-    if output_dir is not None:
-        return output_dir / "gaia_hip_map.parquet"
-
-    parents = {path.parent for path in input_files}
-    if len(parents) != 1:
-        raise click.ClickException(
-            "Input files are in multiple directories; provide --mapping-output."
-        )
-    parent = next(iter(parents))
-    return parent / "gaia_hip_map.parquet"
+        return mapping_output.expanduser()
+    return GAIA_HIP_MAP_OUTPUT
