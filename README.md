@@ -30,12 +30,21 @@ Entry point: **`fis-pipeline`** (or `python -m foundinspace.pipeline`).
 | Command | Description |
 |--------|--------------|
 | `fis-pipeline gaia import INPUT [INPUT ...]` | Read Gaia VOTable(s) (`.vot`, `.vot.gz`, `.vot.xz`), run the Gaia pipeline per batch, and write `{stem}.parquet` next to each input (or under `--output-dir`). |
+| `fis-pipeline hip import INPUT [INPUT ...]` | Read Hipparcos ECSV file(s), run the Hipparcos pipeline, and write `{stem}.parquet` next to each input (or under `--output-dir`). |
+| `fis-pipeline hip download` | Download Hipparcos New Reduction catalog (`I/311/hip2`) to ECSV (default: `downloads/hip_bright.ecsv`). |
 
 **Options for `gaia import`:**
 
 - `--output-dir`, `-o` — Directory for output Parquet files (default: same as input).
 - `--force`, `-f` — Overwrite existing output files.
 - `--limit`, `-l` — Stop after this many output rows (for testing).
+
+**Options for `hip import`:**
+
+- `--output-dir`, `-o` — Directory for output Parquet files (default: same as input).
+- `--force`, `-f` — Overwrite existing output files.
+- `--limit`, `-l` — Stop after this many output rows (for testing).
+- Input format is currently ECSV only.
 
 ## Pipeline stages (Gaia)
 
@@ -53,7 +62,7 @@ Result columns are trimmed to `OUTPUT_COLS` and written as compressed Parquet (z
 ```
 src/foundinspace/
   pipeline/
-    cli.py              # Click root; lazy subcommand "gaia"
+    cli.py              # Click root; lazy subcommands "gaia" and "hip"
     constants.py        # OUTPUT_COLS, quality_flags (DIST_SRC_*, TEFF_SRC_*, PHOT_SRC_*, FLAG_*), qf_* accessors
     __main__.py         # python -m entry
     common/
@@ -66,11 +75,14 @@ src/foundinspace/
       astrometry.py    # select_astrometry_gaia (DR3 / BJ_GEO / BJ_PHOTOGEO)
       photometry.py    # assign_photometry_gaia, compute_mag_abs_gaia, compute_teff_gaia
     hipparcos/
+      cli.py           # hip download, hip import
+      download.py      # fetch Hipparcos ECSV from Vizier
+      pipeline.py      # ECSV -> Hipparcos transforms -> parquet
       astrometry.py    # select_astrometry_hip (Hipparcos-only)
       photometry.py    # assign_photometry_hip, compute_mag_abs_hip, compute_teff_hip
 ```
 
-Hipparcos modules (`hipparcos.astrometry`, `hipparcos.photometry`) provide HIP-only astrometry and photometry for use in a Hipparcos-capable pipeline; the current CLI exposes only the Gaia import path.
+Hipparcos pipeline is available via `fis-pipeline hip import` for ECSV inputs.
 
 ## Key functions
 
