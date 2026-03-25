@@ -7,11 +7,23 @@ A pipeline for reducing **Gaia** and **Hipparcos** data to produce a 3D map of s
 The pipeline produces Parquet tables with a fixed schema. Each row is a star with:
 
 - **Sun-centric Cartesian coordinates** (ICRS frame, J2016.0): `x_icrs_pc`, `y_icrs_pc`, `z_icrs_pc` (parsecs). The origin is the Sun; axes follow the ICRS convention.
-- **Identifiers and source**: `source` (e.g. `"gaia"`), `source_id`, `morton_code` (3D spatial index).
+- **Identifiers and source**: `source` (e.g. `"gaia"` or `"hip"`), `source_id`.
 - **Photometry**: `mag_abs` (absolute magnitude), `teff` (effective temperature, K), `photometry_quality` (magnitude uncertainty).
 - **Provenance and quality**: `quality_flags` (packed uint16: distance source, Teff source, photometry source, validity and review bits), `astrometry_quality` (e.g. fractional parallax error or Bailer-Jones interval width; finite, no inf).
 
+**Morton codes and octree statistics are not produced here**; they belong in a downstream indexer. That stage can shard the merged catalog by **2D sky tiles** (e.g. HEALPix) first so 3D structures do not require scanning every file in the dataset.
+
 See `OUTPUT_COLS` in `foundinspace.pipeline.constants` for the full list.
+
+## End-to-end plan (Gaia + Hipparcos + merge)
+
+Per-catalog CLIs produce staging Parquet. A future **merge** step (see `docs/mergers.md`) will:
+
+1. Run **Gaia** and **Hipparcos** pipelines on their respective inputs.
+2. Run an **overrides pipeline** that normalizes a versioned **manual overrides** table (e.g. missing objects like the Sun, or replacements where Hipparcos binary solutions are poor).
+3. **Merge** using a cross-match table, quality scoring for Gaia-vs-Hip pairs, with **manual overrides taking precedence** over automatic winners.
+4. Emit a **dense** merged table suitable for Stage 00, optionally **partitioned by HEALPix** (or similar) for efficient downstream octree or spatial queries.
+5. Emit **sparse sidecars** (identifiers, HD/Bayer designations, merge decisions) keyed by canonical `source_id`, so rare columns are not duplicated on every row.
 
 ## Installation
 
@@ -53,7 +65,6 @@ For each batch of Gaia data the pipeline:
 1. **Astrometry** (`gaia.astrometry.select_astrometry_gaia`) — Multi-tier distance: Tier A = best of DR3 / BJ geometric / BJ photogeometric (quality-tested); Tier B = weak catalog fallback; Tier C = photometric (M_G + A_G); Tier D = synthetic prior. Sets `distance_use_pc`, `quality_flags`, `*_use_*` columns. No row dropped for bad astrometry alone.
 2. **Photometry** (`gaia.photometry.assign_photometry_gaia`, `compute_mag_abs_gaia`, `compute_teff_gaia`) — Apparent magnitude (G), absolute magnitude (GSP-Phot / extinction-corrected / distance-modulus cascade), and effective temperature (spectroscopic → BP–RP → B–V → default).
 3. **Coordinates** (`common.coords.calculate_coordinates_fast`) — Propagates positions to J2016.0 using proper motions (no radial velocity) and computes `x_icrs_pc`, `y_icrs_pc`, `z_icrs_pc`, plus `ra_deg`, `dec_deg`, `r_pc`.
-4. **Morton code** (`common.morton.add_morton_code`) — 64-bit 3D Morton code from Cartesian coordinates (cube ±200 000 pc, 21 bits per axis).
 
 Result columns are trimmed to `OUTPUT_COLS` and written as compressed Parquet (zstd).
 
@@ -67,7 +78,6 @@ src/foundinspace/
     __main__.py         # python -m entry
     common/
       coords.py         # calculate_coordinates, calculate_coordinates_fast (ICRS → x,y,z at J2016.0)
-      morton.py         # morton3d_u64_from_xyz, add_morton_code
       photometry.py     # teff_to_rgb, teff_to_hex, bv_to_teff, bp_rp_to_teff
     gaia/
       cli.py            # gaia import
@@ -89,7 +99,6 @@ Hipparcos pipeline is available via `fis-pipeline hip import` for ECSV inputs.
 - **`calculate_coordinates`** / **`calculate_coordinates_fast`** (`common.coords`) — Propagate ICRS positions to J2016.0 and add `x_icrs_pc`, `y_icrs_pc`, `z_icrs_pc`, `ra_deg`, `dec_deg`, `r_pc`. The fast version uses pure NumPy (no Astropy) and assumes no radial velocity.
 - **`select_astrometry_gaia`** (`gaia.astrometry`) — Four-tier distance selection (primary → weak catalog → photometric → synthetic prior) with `quality_flags` (uint16) and finite `astrometry_quality`; populates `distance_use_pc` and all `*_use_*` astrometry columns.
 - **`assign_photometry_gaia`** / **`compute_mag_abs_gaia`** / **`compute_teff_gaia`** (`gaia.photometry`) — Gaia G mag, absolute magnitude cascade, and Teff cascade (spectroscopic → BP–RP → B–V → 5800 K default).
-- **`add_morton_code`** (`common.morton`) — Adds `morton_code` from `x_icrs_pc`, `y_icrs_pc`, `z_icrs_pc` (cube ±200 000 pc).
 
 ## Tests
 

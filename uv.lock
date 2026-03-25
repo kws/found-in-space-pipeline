@@ -341,6 +341,7 @@ dependencies = [
     { name = "numpy" },
     { name = "pandas" },
     { name = "pyarrow" },
+    { name = "pyyaml" },
     { name = "votpipe" },
 ]
 
@@ -363,6 +364,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=2.4.3" },
     { name = "pandas", specifier = ">=3.0.1" },
     { name = "pyarrow", specifier = ">=23.0.1" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "votpipe", specifier = ">=0.1.0" },
 ]
 

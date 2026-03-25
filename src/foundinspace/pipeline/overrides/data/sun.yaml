@@ -1,0 +1,24 @@
+# Canonical Sun override.
+description: >
+  Add the Sun as a manual object at the ICRS origin. For deterministic 2D
+  sharding, this uses fixed RA/Dec = (0.0, 0.0) when r_pc = 0.0.
+
+stars:
+  - override_id: manual.sun.add.v1
+    action: add
+    source: manual
+    source_id: sun
+    override_reason: missing_star
+    override_policy_version: v1
+
+    # Deterministic angular fallback for origin objects.
+    ra_deg: 0.0
+    dec_deg: 0.0
+    r_pc: 0.0
+
+    x_icrs_pc: 0.0
+    y_icrs_pc: 0.0
+    z_icrs_pc: 0.0
+
+    mag_abs: 4.83
+    teff: 5778

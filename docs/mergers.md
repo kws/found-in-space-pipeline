@@ -2,37 +2,55 @@
 
 ## Purpose
 
-Define how Gaia and Hipparcos inputs are merged into one canonical Stage 00 input dataset.
+Define how Gaia, Hipparcos, and **manual overrides** are merged into one canonical dataset for downstream processing (Stage 00 onward).
 
-The merger resolves duplicates using a cross-match table and quality rules, then emits parquet compatible with existing Stage 00 and Stage 01 processing.
+The merger resolves duplicates using a cross-match table and quality rules, applies **highest-precedence manual corrections**, then emits Parquet compatible with Stage 00 and Stage 01. **Morton codes and octree construction are not part of this data pipeline**; they belong in a downstream step that can scan **2D spatial shards** (e.g. HEALPix) instead of the full catalog.
 
 ## Scope
 
 This specification covers:
 
-- when merge occurs in the pipeline
-- required inputs and outputs
-- duplicate-resolution rules
-- schema contract for downstream sidecars
+- when merge occurs relative to per-catalog pipelines and spatial sharding
+- required inputs and outputs (including manual overrides)
+- duplicate-resolution rules and override precedence
+- schema contract for the **dense** merged star table vs **sparse** sidecars
 
 This specification does not cover:
 
-- reverse/global lookup indices
-- catalog-specific scientific quality policy details beyond tie-break contract
+- reverse/global lookup indices (implementation detail of serving)
+- catalog-specific scientific quality policy beyond the tie-break and scoring contract
 
 ---
 
 ## Stage placement
 
-Merge occurs **before Stage 00 processing**, as a pre-step:
+### Per-catalog preprocessing
 
-`raw catalogs + crossmatch -> merged canonical parquet -> stage-00 -> stage-01`
+1. **Gaia pipeline** — ingest, astrometry/photometry, coordinates → per-batch or staging Parquet.
+2. **Hipparcos pipeline** — same role for Hipparcos-only rows.
+3. **Overrides pipeline** — normalize the manual overrides table (versioned artifact; see below).
 
-### Rationale
+### Merge (pre–Stage 00)
+
+Merge runs **after** those three inputs exist and **before** Stage 00:
+
+`gaia parquet + hip parquet + crossmatch + manual_overrides → merged canonical parquet → Stage 00 → Stage 01`
+
+### Spatial sharding (after merge, before 3D indexing)
+
+After merge, the combined dataset is written into **2D spatial shards** (recommended: HEALPix at a fixed level, consistent with download partitioning where applicable). Rationale:
+
+- Octree or other 3D structures can be built by reading only tiles that intersect a node, instead of scanning the entire catalog.
+- Morton encoding, if used at all, is a concern of that **downstream** indexer, not of the merge/Stage-00 Parquet schema.
+- To improve locality for downstream 3D passes at low cost, sort rows **within each 2D shard** by `r_pc` (distance) as the default policy.
+- If profiling later shows meaningful gains, replace or extend that with a quantized spherical ordering key (sub-tile angular key interleaved with radial key), while keeping deterministic ordering guarantees.
+
+### Rationale summary
 
 - Merge requires cross-catalog joins that Stage 00 file-local transforms do not perform.
-- Quality metrics needed for selection are available in raw catalog data.
-- Merging earlier avoids deriving `morton_code`/`render` for rows that will be dropped.
+- Quality metrics for Gaia vs Hip winner selection are available from catalog preprocessing.
+- Merging before Stage 00 avoids duplicating heavy work on rows that will be dropped or replaced.
+- **Sparse identifiers** (HD, Bayer, multiple catalog IDs on one object) are kept in **sidecars** so the main table does not carry mostly-null columns across billions of rows.
 
 ---
 
@@ -40,13 +58,58 @@ Merge occurs **before Stage 00 processing**, as a pre-step:
 
 Required:
 
-- Gaia source parquet (or equivalent table)
-- Hipparcos source parquet (or equivalent table)
-- cross-match table mapping Gaia IDs and Hipparcos IDs
+- Gaia source parquet (or equivalent table), after Gaia pipeline preprocessing
+- Hipparcos source parquet (or equivalent table), after Hipparcos pipeline preprocessing
+- Cross-match table mapping Gaia `source_id` and Hipparcos `HIP` (or equivalent) for matched pairs
+- **Manual overrides** table (versioned): explicit `add`, `replace`, and optional `drop` / suppress actions (see below)
 
 Optional:
 
-- additional identifier tables (HD/Bayer/other naming catalogs)
+- Additional identifier tables (HD, Bayer, Flamsteed, etc.) joined **into sidecars**, not necessarily into every row of the dense merge output
+
+---
+
+## Manual overrides
+
+Overrides correct or supplement catalog data where automation is wrong or incomplete, for example:
+
+- **Missing objects** — e.g. the Sun, or other bodies not represented as normal catalog rows.
+- **Poor binary / composite solutions** — e.g. Hipparcos parameters for some resolved binaries; curated astrometry/photometry replaces the catalog row.
+
+Each override row should carry at least:
+
+- `override_id` (stable string or integer)
+- `action`: `add` | `replace` | `drop` (or equivalent)
+- `override_reason` / category (e.g. `missing_star`, `binary_quality`, `manual_astrometry`)
+- `override_policy_version` (for reproducibility)
+- Keys to match existing rows when applicable: `gaia_source_id` and/or `hip_source_id`
+- For `add` / `replace`: fields required by the merged schema (coordinates, `mag_abs`, etc.) or pointers to a curated row definition
+
+### Override target key
+
+Override targeting uses the compound star key:
+
+- `source`
+- `source_id`
+
+where `source` identifies the namespace/catalog (for example `gaia`, `hip`, or `manual`) and `source_id` is only unique within that namespace.
+
+Action-specific minimums:
+
+- `drop`: provide only target identity (`source`, `source_id`) plus audit metadata (`override_id`, `override_reason`, `override_policy_version`, `action`). No astrometry/photometry payload is required.
+- `replace`: provide target identity plus replacement payload fields required by merged output.
+- `add`: provide new identity (or enough information to mint canonical identity) plus payload fields required by merged output.
+
+### Precedence
+
+**Manual overrides outrank automatic merge decisions:**
+
+1. `drop` / suppress — remove or exclude the targeted catalog row(s) from the merged dense output (or mark excluded per policy).
+2. `replace` — substitute curated astrometry/photometry (and identity links) for the matched object; automatic Gaia-vs-Hip scoring does not apply to that conflict.
+3. `add` — insert a row with a canonical `source_id` that may not exist in either catalog (namespace rules below).
+4. Otherwise — apply **M1–M3** for unmatched and matched pairs.
+
+For `drop`, matching is by exact compound key (`source`, `source_id`), and the resolved row is removed from dense output.
 
 ---
 
@@ -54,54 +117,55 @@ Optional:
 
 Each merged output row must have one canonical `source_id` used by sidecars and forward lookups.
 
-Policy:
+Policy (extend as needed; namespaces must be consistent before Stage 00):
 
-- Gaia-selected rows: `source_id = gaia_source_id`
-- Hipparcos-selected rows without Gaia counterpart: `source_id = hip_source_id` in canonical namespace
+- **Gaia-selected rows**: `source_id = gaia_source_id` (or namespaced equivalent).
+- **Hipparcos-selected rows** without a Gaia counterpart: `source_id = hip_source_id` in the Hipparcos namespace.
+- **Manual-only rows** (`add`): `source_id` in a dedicated namespace (e.g. prefixed or separate ID range) so collisions with Gaia/HIP numeric IDs cannot occur.
+- **Replaced rows**: canonical `source_id` follows policy (typically retain the primary catalog id used for serving; document in override row).
 
-If a namespace prefix is required to avoid collisions, it must be applied consistently before Stage 00.
+`catalog_source` on the dense row indicates the **provenance of the chosen astrometry/photometry** for that row: `gaia`, `hip`, or `manual` (or equivalent enum).
 
 ---
 
 ## Duplicate resolution
 
-## Definitions
+### Definitions
 
-- **Matched pair**: one Gaia row and one Hipparcos row linked by cross-match
-- **Unmatched Gaia**: Gaia row not present in cross-match
-- **Unmatched Hipparcos**: Hipparcos row not present in cross-match
+- **Matched pair**: one Gaia row and one Hipparcos row linked by cross-match.
+- **Unmatched Gaia**: Gaia row not present in cross-match.
+- **Unmatched Hipparcos**: Hipparcos row not present in cross-match.
 
-## Rules
+### Rules
 
-### M1. Keep all unmatched rows
+#### M1. Keep all unmatched rows
 
-- Keep all unmatched Gaia rows.
-- Keep all unmatched Hipparcos rows.
+- Keep all unmatched Gaia rows (unless removed by a `drop` override).
+- Keep all unmatched Hipparcos rows (unless removed by a `drop` override).
 
-### M2. Exactly one winner per matched pair
+#### M2. Exactly one winner per matched pair
 
-For each matched pair, compute quality scores and select exactly one winner.
+For each matched pair **not** resolved by a `replace` or `drop` override, compute quality scores and select exactly one winner.
 
-### M3. Deterministic tie-break
+#### M3. Deterministic tie-break
 
 If quality scores tie, apply deterministic tie-break in this order:
 
-1. prefer Gaia
-2. lower canonical `source_id`
+1. Prefer Gaia.
+2. Lower canonical `source_id` (under a fixed ordering).
 
-### M4. No duplicate canonical IDs
+#### M4. No duplicate canonical IDs
 
-Merged output must not contain duplicate canonical `source_id`.
+Merged dense output must not contain duplicate canonical `source_id`.
 
-### M5. Auditable decision record
+#### M5. Auditable decision record
 
-For each matched pair, emit or persist decision provenance with:
+Persist provenance for:
 
-- `gaia_source_id`
-- `hip_source_id`
-- winner catalog
-- score components (or aggregate score)
-- tie-break reason if applicable
+- Each **matched pair** decision: `gaia_source_id`, `hip_source_id`, winner catalog, score components (or aggregate), tie-break reason if applicable.
+- Each **override**: `override_id`, `action`, keys, `override_reason`, `override_policy_version`, and link to canonical `source_id` after merge.
+
+Recommend a dedicated **merge decisions** sidecar (Parquet or JSONL) rather than widening the main table.
 
 ---
 
@@ -123,26 +187,48 @@ Example signals (non-normative):
 
 ## Output schema contract
 
-Merged parquet must satisfy Stage 00 requirements:
+### Dense merged table (all stars)
+
+Must satisfy Stage 00 requirements:
 
 - `x_icrs_pc`, `y_icrs_pc`, `z_icrs_pc`
 - `mag_abs`
 - optional `teff`
 
-Merged parquet should also include identity/provenance fields required by sidecars:
+Should include identity fields:
 
 - `source_id` (canonical, required)
 - `gaia_source_id` (nullable)
 - `hip_source_id` (nullable)
-- `catalog_source` (`gaia` or `hip`)
+- `catalog_source` (`gaia`, `hip`, or `manual`)
 
-Optional naming fields:
+Should also include lightweight spatial helpers needed for 2D sharding and cheap within-shard ordering:
 
-- `hd`
-- `bayer`
-- other sparse designations
+- `ra_deg`
+- `dec_deg`
+- `r_pc`
 
-All extra columns must survive Stage 00 unchanged (`SELECT *` behavior in shard sorting).
+**Do not** require HD, Bayer, or other rare designations on every row of the dense table. Those belong in **sparse sidecars** (below).
+
+Extra columns needed for Stage 00 must survive unchanged where Stage 00 uses `SELECT *` on shards.
+
+### Shard ordering contract (recommended)
+
+When writing merged HEALPix (or equivalent 2D) shards:
+
+- Primary recommendation: stable sort by `r_pc` ascending within each shard (cheap and effective).
+- Optional: compute `spherical_order_key` for closer-to-octree traversal order if benchmarks justify the added complexity.
+- If no explicit key is persisted, ordering must still be deterministic for reproducibility.
+
+### Sparse sidecars (small row counts vs full catalog)
+
+Keep optional metadata out of the billion-row table:
+
+- **Identifiers / aliases**: `canonical_source_id`, optional `gaia_source_id`, `hip_source_id`, `override_id`, plus any extra catalog ids.
+- **Designations**: `canonical_source_id`, `kind` (e.g. `hd`, `bayer`), `value` (and optional components); one row per designation.
+- **Merge decisions**: as in M5, keyed by pair or by `canonical_source_id`.
+
+Downstream UIs or APIs join sidecars when needed.
 
 ---
 
@@ -150,12 +236,14 @@ All extra columns must survive Stage 00 unchanged (`SELECT *` behavior in shard 
 
 Before publishing merged parquet:
 
-1. assert no duplicate canonical `source_id`
-2. assert all matched pairs produce exactly one winner
-3. assert row count equals:
-   `unmatched_gaia + unmatched_hip + matched_pairs`
-4. assert required geometry/magnitude columns are non-null where mandatory
-5. emit merge summary counts by category and winner catalog
+1. Assert no duplicate canonical `source_id` in the dense output.
+2. Assert all matched pairs produce exactly one winner **or** are fully explained by an override (`replace` / `drop`) in the decision record.
+3. Assert row count consistency with documented semantics, e.g.  
+   `unmatched_gaia + unmatched_hip + matched_winners + override_adds − override_drops`  
+   (exact formula must match whether drops remove rows from counts).
+4. Assert required geometry/magnitude columns are non-null where mandatory.
+5. Emit merge summary counts by category, winner catalog, and override action type.
+6. Assert each `drop` override resolves to exactly one existing row by (`source`, `source_id`) and carries no non-audit payload fields.
 
 ---
 
@@ -163,13 +251,15 @@ Before publishing merged parquet:
 
 Merger run should produce:
 
-- canonical merged parquet dataset (input to Stage 00)
-- merge report JSON with counts and policy version
-- optional decision table parquet for audits/debugging
+- Canonical merged dense Parquet (input to Stage 00), optionally **pre-partitioned by HEALPix** (or equivalent 2D key) for downstream octree/index builds
+- Merge report JSON with counts and policy versions (merge policy + override policy)
+- Decision / override audit tables (Parquet recommended)
+- Sparse sidecar Parquet files for identifiers and designations
 
 ---
 
 ## Non-normative notes
 
-- A "merge plan now, apply later" strategy adds pipeline complexity with little benefit; current recommendation is direct pre-Stage-00 merge.
-- Full reverse lookup indices remain downstream derived artifacts and are not part of merge output requirements.
+- A "merge plan now, apply later" strategy adds pipeline complexity with little benefit; current recommendation is direct merge after catalog preprocessing and before Stage 00.
+- Full reverse lookup indices remain serving-layer artifacts; the **sidecars** above are the pipeline’s contract for sparse metadata.
+- HEALPix level for **serving shards** may differ from HEALPix used only for **Gaia download batching**; document the level used for merged output.
