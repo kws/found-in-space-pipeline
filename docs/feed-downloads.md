@@ -6,6 +6,7 @@ It covers:
 
 - Hipparcos: one catalog download.
 - Gaia: all-sky HEALPix-L3 counting, batch planning under a row cap, and per-batch async downloads.
+- Identifiers: HIP/HD, Bayer/Flamsteed, and proper-name source catalogs used to build a wide sidecar.
 
 ## Prerequisites
 
@@ -24,6 +25,10 @@ python -m pip install astroquery astropy pandas numpy
 Recommended outputs:
 
 - `hip_bright.ecsv` (Hipparcos raw catalog).
+- `hip_hd.ecsv` (HIP→HD from `I/239/hip_main`).
+- `iv27a_catalog.ecsv` (`HIP`, `HD`, `Bayer`, `Fl`, `Cst` from `IV/27A/catalog`).
+- `iv27a_proper_names.ecsv` (`HD`→proper names from `IV/27A/table3`).
+- `star_identifiers.parquet` (wide sidecar keyed by `hip_source_id`).
 - `gaia-l3-all-sky-count.csv` (L3 tile counts + manual status).
 - `gaia_batch_plan.csv` (optional: batch assignment for each `hp3`).
 - `gaia_batch_<label>.vot.gz` (one file per Gaia download batch).

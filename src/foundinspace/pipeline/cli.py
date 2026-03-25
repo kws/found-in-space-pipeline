@@ -25,6 +25,7 @@ class LazyGroup(click.Group):
     lazy_subcommands={
         "gaia": "foundinspace.pipeline.gaia.cli:cli",
         "hip": "foundinspace.pipeline.hipparcos.cli:cli",
+        "identifiers": "foundinspace.pipeline.identifiers.cli:cli",
     },
 )
 def cli():

@@ -226,7 +226,7 @@ When writing merged HEALPix (or equivalent 2D) shards:
 Keep optional metadata out of the billion-row table:
 
 - **Identifiers / aliases**: `canonical_source_id`, optional `gaia_source_id`, `hip_source_id`, `override_id`, plus any extra catalog ids.
-- **Designations**: `canonical_source_id`, `kind` (e.g. `hd`, `bayer`), `value` (and optional components); one row per designation.
+- **Designations (current policy)**: for small curated designation sets, prefer a **wide sidecar** keyed by star ID (for example `hip_source_id`, `hd`, `bayer`, `fl`, `cst`, `proper_name`) instead of a `kind/value` long table.
 - **Merge decisions**: as in M5, keyed by pair or by `canonical_source_id`.
 
 Downstream UIs or APIs join sidecars when needed.

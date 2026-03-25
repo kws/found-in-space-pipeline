@@ -44,6 +44,9 @@ Entry point: **`fis-pipeline`** (or `python -m foundinspace.pipeline`).
 | `fis-pipeline gaia import INPUT [INPUT ...]` | Read Gaia VOTable(s) (`.vot`, `.vot.gz`, `.vot.xz`), run the Gaia pipeline per batch, write `{stem}.parquet` next to each input (or under `--output-dir`), and emit one Gaia↔HIP mapping sidecar for the command run. |
 | `fis-pipeline hip import INPUT [INPUT ...]` | Read Hipparcos ECSV file(s), run the Hipparcos pipeline, and write `{stem}.parquet` next to each input (or under `--output-dir`). |
 | `fis-pipeline hip download` | Download Hipparcos New Reduction catalog (`I/311/hip2`) to ECSV (default: `downloads/hip_bright.ecsv`). |
+| `fis-pipeline identifiers download` | Download identifier source catalogs (`I/239/hip_main`, `IV/27A/catalog`, `IV/27A/table3`) to ECSV files in `downloads/`. |
+| `fis-pipeline identifiers prepare` | Build a wide identifiers sidecar parquet keyed by `hip_source_id` (default: `downloads/star_identifiers.parquet`). |
+| `fis-pipeline identifiers build` | Run `identifiers download` then `identifiers prepare` in one command. |
 
 **Options for `gaia import`:**
 
@@ -58,6 +61,19 @@ Entry point: **`fis-pipeline`** (or `python -m foundinspace.pipeline`).
 - `--force`, `-f` — Overwrite existing output files.
 - `--limit`, `-l` — Stop after this many output rows (for testing).
 - Input format is currently ECSV only.
+
+**Identifiers sidecar schema (`identifiers prepare`)**
+
+The sidecar is intentionally **wide** and small, with one row per HIP identifier:
+
+- `hip_source_id` (`uint64`)
+- `hd` (`Int64`, nullable)
+- `bayer` (`string`, nullable display value such as `alpha Cas`)
+- `fl` (`Int64`, nullable Flamsteed number from IV/27A)
+- `cst` (`string`, nullable constellation abbreviation from IV/27A)
+- `proper_name` (`string`, nullable; first proper name by HD from IV/27A/table3)
+
+Rows are emitted only when at least one of `bayer` or `proper_name` is present.
 
 ## Pipeline stages (Gaia)
 
@@ -74,7 +90,7 @@ Result columns are trimmed to `OUTPUT_COLS` and written as compressed Parquet (z
 ```
 src/foundinspace/
   pipeline/
-    cli.py              # Click root; lazy subcommands "gaia" and "hip"
+    cli.py              # Click root; lazy subcommands "gaia", "hip", "identifiers"
     constants.py        # OUTPUT_COLS, quality_flags (DIST_SRC_*, TEFF_SRC_*, PHOT_SRC_*, FLAG_*), qf_* accessors
     __main__.py         # python -m entry
     common/
@@ -91,6 +107,10 @@ src/foundinspace/
       pipeline.py      # ECSV -> Hipparcos transforms -> parquet
       astrometry.py    # select_astrometry_hip (Hipparcos-only)
       photometry.py    # assign_photometry_hip, compute_mag_abs_hip, compute_teff_hip
+    identifiers/
+      cli.py           # identifiers download, prepare, build
+      download.py      # fetch HIP/HD + Bayer/Flamsteed + proper-name catalogs
+      pipeline.py      # build wide identifiers sidecar parquet
 ```
 
 Hipparcos pipeline is available via `fis-pipeline hip import` for ECSV inputs.
