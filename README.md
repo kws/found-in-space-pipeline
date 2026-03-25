@@ -41,13 +41,14 @@ Entry point: **`fis-pipeline`** (or `python -m foundinspace.pipeline`).
 
 | Command | Description |
 |--------|--------------|
-| `fis-pipeline gaia import INPUT [INPUT ...]` | Read Gaia VOTable(s) (`.vot`, `.vot.gz`, `.vot.xz`), run the Gaia pipeline per batch, and write `{stem}.parquet` next to each input (or under `--output-dir`). |
+| `fis-pipeline gaia import INPUT [INPUT ...]` | Read Gaia VOTable(s) (`.vot`, `.vot.gz`, `.vot.xz`), run the Gaia pipeline per batch, write `{stem}.parquet` next to each input (or under `--output-dir`), and emit one Gaia↔HIP mapping sidecar for the command run. |
 | `fis-pipeline hip import INPUT [INPUT ...]` | Read Hipparcos ECSV file(s), run the Hipparcos pipeline, and write `{stem}.parquet` next to each input (or under `--output-dir`). |
 | `fis-pipeline hip download` | Download Hipparcos New Reduction catalog (`I/311/hip2`) to ECSV (default: `downloads/hip_bright.ecsv`). |
 
 **Options for `gaia import`:**
 
 - `--output-dir`, `-o` — Directory for output Parquet files (default: same as input).
+- `--mapping-output` — Run-level Gaia↔HIP mapping sidecar path (default: `gaia_hip_map.parquet` in `--output-dir`, or in the common input directory when all inputs share one).
 - `--force`, `-f` — Overwrite existing output files.
 - `--limit`, `-l` — Stop after this many output rows (for testing).
 

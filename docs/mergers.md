@@ -66,6 +66,7 @@ Required:
 Optional:
 
 - Additional identifier tables (HD, Bayer, Flamsteed, etc.) joined **into sidecars**, not necessarily into every row of the dense merge output
+- A provisional Gaia-import mapping sidecar (`gaia_source_id` ↔ `hip_source_id`, when Gaia input includes `hip`) to reduce re-scan cost. This artifact is advisory and can be superseded by merge-time crossmatch/override resolution.
 
 ---
 
@@ -263,3 +264,4 @@ Merger run should produce:
 - A "merge plan now, apply later" strategy adds pipeline complexity with little benefit; current recommendation is direct merge after catalog preprocessing and before Stage 00.
 - Full reverse lookup indices remain serving-layer artifacts; the **sidecars** above are the pipeline’s contract for sparse metadata.
 - HEALPix level for **serving shards** may differ from HEALPix used only for **Gaia download batching**; document the level used for merged output.
+- Gaia-import sidecars can provide convenient `gaia_source_id` ↔ `hip_source_id` hints, but merge outputs remain the canonical source of truth for identity/provenance after overrides and winner selection.
