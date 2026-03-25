@@ -16,7 +16,6 @@ import pyarrow.parquet as pq
 from votpipe import parse_votable
 
 from foundinspace.pipeline.common.coords import calculate_coordinates_fast
-from foundinspace.pipeline.common.morton import add_morton_code
 from foundinspace.pipeline.constants import OUTPUT_COLS
 from foundinspace.pipeline.gaia.astrometry import select_astrometry_gaia
 from foundinspace.pipeline.gaia.photometry import (
@@ -39,7 +38,6 @@ def _run_gaia_pipeline_batch(df: pd.DataFrame) -> pd.DataFrame:
     work = assign_photometry_gaia(work)
     # work = filter_positional_gaia(work)
     work = calculate_coordinates_fast(work)
-    work = add_morton_code(work)
     work = compute_mag_abs_gaia(work)
     work = compute_teff_gaia(work)
     # work = compute_log_g_gaia(work)

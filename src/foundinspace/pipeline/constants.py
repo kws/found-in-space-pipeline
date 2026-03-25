@@ -86,7 +86,6 @@ def qf_dist_plausible(flags):
 
 
 OUTPUT_COLS = [
-    "morton_code",
     "source",
     "source_id",
     "x_icrs_pc",
