@@ -35,13 +35,18 @@ def cli():
     help="Run-level Gaia↔HIP mapping output path (Parquet).",
 )
 @click.option("--force", "-f", is_flag=True, default=False)
-@click.option("--limit", "-l", type=int, default=None)
+@click.option(
+    "--mag-limit",
+    type=float,
+    default=None,
+    help="Keep only rows with Gaia G magnitude <= this value.",
+)
 def import_gaia(
     input_files: list[Path],
     output_dir: Path = PROCESSED_GAIA_DIR,
     mapping_output: Path | None = None,
     force: bool = False,
-    limit: int | None = None,
+    mag_limit: float | None = None,
 ):
     if len(input_files) == 0:
         click.echo("No input files provided")
@@ -65,7 +70,12 @@ def import_gaia(
         output_name = _output_path_for(input_file)
         output_file = output_root / output_name
 
-        mapping = main(input_file, output_file, skip_if_exists=not force, limit=limit)
+        mapping = main(
+            input_file,
+            output_file,
+            skip_if_exists=not force,
+            mag_limit=mag_limit,
+        )
         if not mapping.empty:
             mapping_chunks.append(mapping)
 

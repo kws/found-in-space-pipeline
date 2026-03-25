@@ -54,7 +54,7 @@ Entry point: **`fis-pipeline`** (or `python -m foundinspace.pipeline`).
 - `--output-dir`, `-o` — Directory for Gaia output Parquet files (default: `data/processed/gaia`).
 - `--mapping-output` — Run-level Gaia↔HIP mapping sidecar path (default: `data/processed/gaia_hip_map.parquet`).
 - `--force`, `-f` — Overwrite existing output files.
-- `--limit`, `-l` — Stop after this many output rows (for testing).
+- `--mag-limit` — Keep only rows with Gaia G magnitude (`phot_g_mean_mag`) less than or equal to this value.
 
 **Options for `hip import`:**
 

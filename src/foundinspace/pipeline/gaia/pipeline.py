@@ -133,7 +133,7 @@ def main(
     output_path: Path,
     *,
     skip_if_exists: bool = True,
-    limit: int | None = None,
+    mag_limit: float | None = None,
 ) -> pd.DataFrame:
     """Stream input_path (VOTable), run pipeline per batch, write to output_path."""
     if skip_if_exists and output_path.exists():
@@ -155,14 +155,19 @@ def main(
 
     def on_batch(fields: list, rows: list) -> None:
         nonlocal writer, written_rows, batch_count, extracted_mapping_rows
-        if limit is not None and written_rows >= limit:
-            print(f"Reached limit of {limit:,} rows")
-            return
         if not rows:
             return
         names = [f["name"] for f in fields]
         names_lower = [n.lower() for n in names]
         df = pd.DataFrame(rows, columns=names_lower)
+        if mag_limit is not None:
+            g_mag = pd.to_numeric(
+                df.get("phot_g_mean_mag", pd.Series(np.nan, index=df.index)),
+                errors="coerce",
+            )
+            df = df[g_mag <= mag_limit]
+            if df.empty:
+                return
         mapping = extract_gaia_hip_mapping(df)
         if not mapping.empty:
             mapping_chunks.append(mapping)
