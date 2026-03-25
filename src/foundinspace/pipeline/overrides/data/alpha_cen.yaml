@@ -19,12 +19,15 @@ stars:
     mag_abs: 4.3771
     teff: 5792
 
-    position_ref: "SIMBAD coord, van Leeuwen 2007"
-    distance_ref: "Kervella et al. 2016/2017 system parallax"
-    photometry_ref: "SIMBAD V photometry, Ducati 2002"
     photometry_band: "Johnson V"
     photometry_quality: "C"
     photometry_value: 0.01
+    notes: >
+      Position follows SIMBAD coordinates associated with the Hipparcos frame
+      (van Leeuwen 2007 context). Distance uses the Alpha Cen system parallax
+      solution from Kervella et al. (2016/2017) and is applied to both A and B
+      to keep a single binary-consistent distance. Photometric value is SIMBAD
+      Johnson V (Ducati 2002 compilation), carrying the catalogue quality flag C.
 
   - override_id: manual.alpha_cen_b.replace.v1
     action: replace
@@ -40,12 +43,15 @@ stars:
     mag_abs: 5.6971
     teff: 5231
 
-    position_ref: "SIMBAD coord, van Leeuwen 2007"
-    distance_ref: "Kervella et al. 2016/2017 system parallax"
-    photometry_ref: "SIMBAD V photometry, Ducati 2002"
     photometry_band: "Johnson V"
     photometry_quality: "C"
     photometry_value: 1.33
+    notes: >
+      Position follows SIMBAD coordinates associated with the Hipparcos frame
+      (van Leeuwen 2007 context). Distance uses the same Kervella et al.
+      (2016/2017) system-level Alpha Cen parallax used for component A so both
+      components remain internally consistent. Photometric value is SIMBAD
+      Johnson V (Ducati 2002 compilation), carrying the catalogue quality flag C.
 
   - override_id: manual.proxima_cen.replace.v1
     action: replace
@@ -61,10 +67,13 @@ stars:
     mag_abs: 15.5570
     teff: 2980
 
-    position_ref: "SIMBAD coord/parallax, Gaia DR3"
-    distance_ref: "Gaia DR3 parallax via SIMBAD"
-    photometry_ref: "SIMBAD V photometry, Jao et al. 2014"
     photometry_band: "Johnson V"
     photometry_quality: "D"
     photometry_value: 11.13
     photometry_note: "Variable flare star; fixed V is a representative catalogue value, not a constant brightness."
+    notes: >
+      Position and distance are anchored to Gaia DR3 astrometry as carried via
+      SIMBAD. Photometry uses SIMBAD Johnson V linked to Jao et al. (2014).
+      Because Proxima is a flare star, the fixed V value is a representative
+      catalogue brightness for pipeline use rather than a physically constant
+      magnitude at all epochs.

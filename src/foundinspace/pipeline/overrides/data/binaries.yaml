@@ -1,0 +1,47 @@
+description: >
+  Manual overrides for resolved white-dwarf companions where catalogue
+  photometry is incomplete, blended, or not present in Gaia DR3 source rows
+  used by the pipeline.
+
+notes: >
+  Distances are taken from SIMBAD-carried Gaia/Hipparcos parallaxes, while
+  photometry and effective temperatures are taken from resolved HST studies.
+
+stars:
+  - override_id: manual.sirius_b.override.v1
+    action: override
+    source: literature_plus_gaia
+    source_id: sirius_b
+    override_reason: weak_catalogue_photometry_for_resolved_white_dwarf
+    override_policy_version: v1
+
+    ra_deg: 101.2871553333
+    dec_deg: -16.7161158611
+    r_pc: 2.6703011245
+    mag_abs: 11.3952
+    teff: 25193
+    notes: >
+      Distance is from SIMBAD's Gaia DR3 parallax for Sirius B
+      (374.4896 +/- 0.2313 mas; B/C not separated in the SIMBAD note). The
+      photometric/temperature inputs are from Barstow et al. (2005, HST/STIS
+      Balmer-line analysis), using Teff = 25193 K and resolved V = 8.528 +/-
+      0.05 rather than catalogue values with poor component separation.
+
+  - override_id: manual.procyon_b.override.v1
+    action: override
+    source: literature_plus_hipparcos
+    source_id: procyon_b
+    override_reason: missing_from_gaia_dr3_resolved_white_dwarf
+    override_policy_version: v1
+
+    ra_deg: 114.8254935000
+    dec_deg: 5.2249930694
+    r_pc: 3.5141973573
+    mag_abs: 13.0909
+    teff: 7740
+    notes: >
+      Distance is from the Hipparcos new reduction (van Leeuwen 2007) as
+      carried by SIMBAD for the Procyon system (parallax 284.56 +/- 1.26 mas).
+      Resolved white-dwarf photometry and temperature are from Provencal et al.
+      (2002, HST/STIS), commonly summarised in later compilations (e.g. Bond
+      et al. 2015) as V = 10.82 +/- 0.03 and Teff = 7740 +/- 50 K.

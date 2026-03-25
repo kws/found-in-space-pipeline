@@ -26,46 +26,13 @@ stars:
     mag_band: Johnson_V
     teff: 5772
 
-    origin_ref: manual.synthetic_icrs_origin_v1
-    distance_ref: manual.synthetic_icrs_origin_v1
-    position_ref: manual.synthetic_icrs_origin_v1
-    photometry_ref: torres2010_solar_mv
-    temperature_ref: prsa2016_iau_b3
-
-    notes:
-      - "ra_deg/dec_deg/r_pc and x/y/z are manual deterministic catalogue values for a synthetic origin object, not measured astrometry."
-      - "mag_abs is the Sun's traditional absolute visual magnitude in Johnson V."
-      - "teff uses the IAU 2015 nominal solar effective temperature."
-
-references:
-  - ref_id: manual.synthetic_icrs_origin_v1
-    citation: >
-      Project convention: synthetic Sun object placed at the ICRS origin for
-      deterministic sharding. No observational astrometric source applies
-      because the Sun is being inserted as a manual origin object.
-
-  - ref_id: prsa2016_iau_b3
-    citation: >
-      Prša, A., Harmanec, P., Torres, G., et al. (2016). Nominal Values for
-      Selected Solar and Planetary Quantities: IAU 2015 Resolution B3.
-      Astronomical Journal, 152, 41.
     notes: >
-      Defines the nominal solar effective temperature T_eff,⊙ = 5772 K.
-
-  - ref_id: torres2010_solar_mv
-    citation: >
-      Torres, G. (2010). On the Use of Empirical Bolometric Corrections for
-      Stars. Astronomical Journal, 140, 1158-1162.
-    notes: >
-      Reviews the solar visual magnitude convention and quotes a consensus
-      M_V,⊙ ≈ 4.81 ± 0.03. Using 4.83 remains a common traditional Johnson V
-      convention in the literature.
-
-  - ref_id: willmer2018_solar_filters
-    citation: >
-      Willmer, C. N. A. (2018). The Absolute Magnitude of the Sun in Several
-      Filters. Astrophysical Journal Supplement Series, 236, 47.
-    notes: >
-      Modern synthetic estimate for the Sun in the V band is approximately
-      M_V,⊙ ≈ 4.81 (vegamag/Vega-based system), useful if you later prefer a
-      modernised solar photometric convention over the traditional 4.83.
+      The astrometric coordinates (ra_deg/dec_deg/r_pc and x/y/z) are manual
+      deterministic catalogue conventions for a synthetic origin object used by
+      this pipeline, not observationally measured solar astrometry. teff uses
+      the IAU 2015 nominal solar effective temperature from Prsa et al. (2016,
+      Resolution B3): T_eff,Sun = 5772 K. mag_abs is set to the traditional
+      Johnson V solar absolute magnitude 4.83; this is intentionally a
+      convention choice. Literature also reports modern synthetic estimates near
+      M_V,Sun ~ 4.81 (e.g. Torres 2010; Willmer 2018), but we retain 4.83 for
+      continuity with common historical catalogue usage.

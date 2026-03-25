@@ -58,6 +58,6 @@ show_missing = true
 exclude_lines = ["pragma: no cover"]
 
 [tool.pytest.ini_options]
-addopts = "--cov=foundinspace --cov-report=term-missing"
+addopts = "--import-mode=importlib --cov=foundinspace --cov-report=term-missing"
 testpaths = ["tests"]
 pythonpath = ["src"]
