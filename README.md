@@ -47,6 +47,7 @@ Entry point: **`fis-pipeline`** (or `python -m foundinspace.pipeline`).
 | `fis-pipeline identifiers download` | Download identifier source catalogs (`I/239/hip_main`, `IV/27A/catalog`, `IV/27A/table3`) to ECSV files in `data/catalogs/`. |
 | `fis-pipeline identifiers prepare` | Build a wide identifiers sidecar parquet keyed by `hip_source_id` (default: `data/processed/identifiers_map.parquet`). |
 | `fis-pipeline identifiers build` | Run `identifiers download` then `identifiers prepare` in one command. |
+| `fis-pipeline overrides prepare` | Build merger-ready overrides Parquet from packaged YAML (`OUTPUT_COLS` + override metadata; default: `data/processed/overrides.parquet`). |
 
 **Options for `gaia import`:**
 
@@ -62,6 +63,12 @@ Entry point: **`fis-pipeline`** (or `python -m foundinspace.pipeline`).
 - `--limit`, `-l` — Stop after this many output rows (for testing).
 - Input format is currently ECSV only.
 
+**Options for `overrides prepare`:**
+
+- `--data-dir` — Directory of override YAML files (default: packaged `overrides/data`).
+- `--output`, `-o` — Output Parquet path (default: `data/processed/overrides.parquet`).
+- `--force`, `-f` — Overwrite existing output file.
+
 ### Default storage layout and `.env` overrides
 
 By default, the pipeline uses:
@@ -72,6 +79,7 @@ By default, the pipeline uses:
   - Gaia↔HIP map at `data/processed/gaia_hip_map.parquet`
   - Hipparcos stars at `data/processed/hip_stars.parquet`
   - Identifiers sidecar at `data/processed/identifiers_map.parquet`
+  - Manual overrides table at `data/processed/overrides.parquet` (from `overrides prepare`)
 
 Both roots are configurable via environment variables (for example in a `.env` file):
 
@@ -93,6 +101,10 @@ The sidecar is intentionally **wide** and small, with one row per HIP identifier
 
 Rows are emitted only when at least one of `bayer` or `proper_name` is present.
 
+**Overrides table schema (`overrides prepare`)**
+
+One row per YAML override star: same columns as `OUTPUT_COLS` plus `override_id`, `action`, `override_reason`, `override_policy_version`. Non-drop rows set `quality_flags` with `DIST_SRC_OVERRIDE` (see `constants.py`) and `FLAG_DIST_VALID`; `astrometry_quality` and `photometry_quality` are `0.0` (placeholders). `drop` rows keep `source` / `source_id` for targeting and null the remaining `OUTPUT_COLS` fields. `source_id` is stored as string for consistent merger matching.
+
 ## Pipeline stages (Gaia)
 
 For each batch of Gaia data the pipeline:
@@ -108,7 +120,7 @@ Result columns are trimmed to `OUTPUT_COLS` and written as compressed Parquet (z
 ```
 src/foundinspace/
   pipeline/
-    cli.py              # Click root; lazy subcommands "gaia", "hip", "identifiers"
+    cli.py              # Click root; lazy subcommands "gaia", "hip", "identifiers", "overrides"
     constants.py        # OUTPUT_COLS, quality_flags (DIST_SRC_*, TEFF_SRC_*, PHOT_SRC_*, FLAG_*), qf_* accessors
     __main__.py         # python -m entry
     common/
@@ -129,6 +141,10 @@ src/foundinspace/
       cli.py           # identifiers download, prepare, build
       download.py      # fetch HIP/HD + Bayer/Flamsteed + proper-name catalogs
       pipeline.py      # build wide identifiers sidecar parquet
+    overrides/
+      cli.py           # overrides prepare
+      loader.py        # load/normalize YAML override stars
+      pipeline.py      # YAML → overrides.parquet for merger
 ```
 
 Hipparcos pipeline is available via `fis-pipeline hip import` for ECSV inputs.

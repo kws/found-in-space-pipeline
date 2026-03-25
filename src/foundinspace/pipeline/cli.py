@@ -26,6 +26,7 @@ class LazyGroup(click.Group):
         "gaia": "foundinspace.pipeline.gaia.cli:cli",
         "hip": "foundinspace.pipeline.hipparcos.cli:cli",
         "identifiers": "foundinspace.pipeline.identifiers.cli:cli",
+        "overrides": "foundinspace.pipeline.overrides.cli:cli",
     },
 )
 def cli():

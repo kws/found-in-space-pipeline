@@ -8,10 +8,10 @@ notes: >
   photometry and effective temperatures are taken from resolved HST studies.
 
 stars:
-  - override_id: manual.sirius_b.override.v1
-    action: override
-    source: literature_plus_gaia
-    source_id: sirius_b
+  - override_id: manual.sirius_b.replace.v1
+    action: replace
+    source: gaia
+    source_id: 2947050466531873024
     override_reason: weak_catalogue_photometry_for_resolved_white_dwarf
     override_policy_version: v1
 
@@ -27,9 +27,9 @@ stars:
       Balmer-line analysis), using Teff = 25193 K and resolved V = 8.528 +/-
       0.05 rather than catalogue values with poor component separation.
 
-  - override_id: manual.procyon_b.override.v1
-    action: override
-    source: literature_plus_hipparcos
+  - override_id: manual.procyon_b.replace.v1
+    action: add
+    source: manual
     source_id: procyon_b
     override_reason: missing_from_gaia_dr3_resolved_white_dwarf
     override_policy_version: v1

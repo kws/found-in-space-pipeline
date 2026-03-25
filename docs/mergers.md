@@ -83,6 +83,7 @@ Within `data/processed/`, current naming policy is deterministic and source-awar
 - Gaia/Hip mapping: `data/processed/gaia_hip_map.parquet` (top level, intentionally **not** under `gaia/`)
 - Hipparcos processed stars: `data/processed/hip_stars.parquet`
 - Identifier mapping sidecar: `data/processed/identifiers_map.parquet`
+- Manual overrides (merger input): `data/processed/overrides.parquet` — single wide table: `OUTPUT_COLS` plus `override_id`, `action`, `override_reason`, `override_policy_version`. Non-drop rows use `DIST_SRC_OVERRIDE` in `quality_flags` (with `FLAG_DIST_VALID`); `astrometry_quality` / `photometry_quality` are `0.0` placeholders. `drop` rows null payload columns in `OUTPUT_COLS` except `source` / `source_id` for targeting.
 
 Rationale:
 
@@ -285,19 +286,11 @@ Merger run should produce:
 
 The following are still intentionally unresolved and should be fixed before coding the first merger implementation:
 
-1. **Overrides processed artifact shape**
-   - One wide file (for example `overrides.parquet`) containing `action` + payload columns with nullable payload for `drop`; or
-   - Two files (for example `overrides_actions.parquet` + `overrides_stars.parquet`) separating audit/action rows from row payloads.
-
-2. **Overrides deterministic filename(s)**
-   - Confirm final processed output name(s) under `data/processed/` for override-derived artifacts.
-   - A placeholder like `overrides_stars.parquet` is acceptable only if shape and usage are clearly documented.
-
-3. **Matched-pair winner policy version 1**
+1. **Matched-pair winner policy version 1**
    - Confirm whether v1 defaults to "prefer Gaia for matched pairs unless an override intervenes", or
    - v1 must compute a full Gaia-vs-Hip quality score for every matched pair.
 
-4. **Canonical identity for `replace` actions**
+2. **Canonical identity for `replace` actions**
    - Confirm whether replacement rows always retain the original target canonical `source_id`, or
    - can remap canonical identity (if so, document strict allowed cases).
 
