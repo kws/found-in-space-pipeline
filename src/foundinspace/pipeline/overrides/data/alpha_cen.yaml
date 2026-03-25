@@ -2,12 +2,13 @@ description: >
   Manual overrides for the Alpha Centauri system. Distances for Alpha Cen A/B
   are pinned to a system-level binary solution rather than per-component Gaia/
   Hipparcos entries. Photometric values preserve source-specific quality flags.
+  HIP numbers: A = 71683, B = 71681, Proxima = 70890.
 
 stars:
-  - override_id: manual.alpha_cen_a.override.v1
-    action: override
-    source: alpha_cen_system
-    source_id: alf_cen_a
+  - override_id: manual.alpha_cen_a.replace.v1
+    action: replace
+    source: hip
+    source_id: 71683
     override_reason: binary_astrometry_photometry
     override_policy_version: kervella2016_v1
 
@@ -25,10 +26,10 @@ stars:
     photometry_quality: "C"
     photometry_value: 0.01
 
-  - override_id: manual.alpha_cen_b.override.v1
-    action: override
-    source: alpha_cen_system
-    source_id: alf_cen_b
+  - override_id: manual.alpha_cen_b.replace.v1
+    action: replace
+    source: hip
+    source_id: 71681
     override_reason: binary_astrometry_photometry
     override_policy_version: kervella2016_v1
 
@@ -46,10 +47,10 @@ stars:
     photometry_quality: "C"
     photometry_value: 1.33
 
-  - override_id: manual.proxima_cen.override.v1
-    action: override
-    source: gaia_dr3_plus_photometry
-    source_id: proxima_cen
+  - override_id: manual.proxima_cen.replace.v1
+    action: replace
+    source: hip
+    source_id: 70890
     override_reason: variable_star_manual_quality_annotation
     override_policy_version: gaia_dr3_v1
 
