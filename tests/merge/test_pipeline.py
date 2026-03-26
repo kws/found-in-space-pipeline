@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
 import pandas as pd
@@ -17,6 +18,22 @@ def _write_parquet(df: pd.DataFrame, path: Path) -> None:
     pq.write_table(pa.Table.from_pandas(df, preserve_index=False), str(path), compression="zstd")
 
 
+def _with_radec_r_pc(row: dict) -> dict:
+    """Fill ra_deg, dec_deg, r_pc from Cartesian (matches coordinate pipeline)."""
+    x = float(row["x_icrs_pc"])
+    y = float(row["y_icrs_pc"])
+    z = float(row["z_icrs_pc"])
+    r = math.sqrt(x * x + y * y + z * z)
+    if r > 0.0:
+        ra = (math.degrees(math.atan2(y, x)) + 360.0) % 360.0
+        dec = math.degrees(math.asin(max(-1.0, min(1.0, z / r))))
+    else:
+        ra = 0.0
+        dec = 0.0
+    out = {**row, "ra_deg": ra, "dec_deg": dec, "r_pc": r}
+    return out
+
+
 def test_run_merge_streaming_with_overrides_and_missing_partners(tmp_path: Path):
     gaia_dir = tmp_path / "gaia"
     hip_path = tmp_path / "hip_stars.parquet"
@@ -26,120 +43,138 @@ def test_run_merge_streaming_with_overrides_and_missing_partners(tmp_path: Path)
 
     gaia_df = pd.DataFrame(
         [
-            {
-                "source": "gaia",
-                "source_id": 1001,
-                "x_icrs_pc": 1.0,
-                "y_icrs_pc": 0.0,
-                "z_icrs_pc": 0.0,
-                "mag_abs": 1.0,
-                "teff": 5000.0,
-                "quality_flags": 1,
-                "astrometry_quality": 0.1,
-                "photometry_quality": 0.1,
-            },
-            {
-                "source": "gaia",
-                "source_id": 1002,
-                "x_icrs_pc": 0.0,
-                "y_icrs_pc": 1.0,
-                "z_icrs_pc": 0.0,
-                "mag_abs": 2.0,
-                "teff": 5100.0,
-                "quality_flags": 1,
-                "astrometry_quality": 0.2,
-                "photometry_quality": 0.1,
-            },
-            {
-                "source": "gaia",
-                "source_id": 1004,
-                "x_icrs_pc": 0.0,
-                "y_icrs_pc": 0.0,
-                "z_icrs_pc": 1.0,
-                "mag_abs": 3.0,
-                "teff": 5200.0,
-                "quality_flags": 1,
-                "astrometry_quality": 0.4,
-                "photometry_quality": 0.1,
-            },
-            {
-                "source": "gaia",
-                "source_id": 1010,
-                "x_icrs_pc": -1.0,
-                "y_icrs_pc": 0.0,
-                "z_icrs_pc": 0.0,
-                "mag_abs": 4.0,
-                "teff": 5300.0,
-                "quality_flags": 1,
-                "astrometry_quality": 0.2,
-                "photometry_quality": 0.1,
-            },
+            _with_radec_r_pc(
+                {
+                    "source": "gaia",
+                    "source_id": 1001,
+                    "x_icrs_pc": 1.0,
+                    "y_icrs_pc": 0.0,
+                    "z_icrs_pc": 0.0,
+                    "mag_abs": 1.0,
+                    "teff": 5000.0,
+                    "quality_flags": 1,
+                    "astrometry_quality": 0.1,
+                    "photometry_quality": 0.1,
+                }
+            ),
+            _with_radec_r_pc(
+                {
+                    "source": "gaia",
+                    "source_id": 1002,
+                    "x_icrs_pc": 0.0,
+                    "y_icrs_pc": 1.0,
+                    "z_icrs_pc": 0.0,
+                    "mag_abs": 2.0,
+                    "teff": 5100.0,
+                    "quality_flags": 1,
+                    "astrometry_quality": 0.2,
+                    "photometry_quality": 0.1,
+                }
+            ),
+            _with_radec_r_pc(
+                {
+                    "source": "gaia",
+                    "source_id": 1004,
+                    "x_icrs_pc": 0.0,
+                    "y_icrs_pc": 0.0,
+                    "z_icrs_pc": 1.0,
+                    "mag_abs": 3.0,
+                    "teff": 5200.0,
+                    "quality_flags": 1,
+                    "astrometry_quality": 0.4,
+                    "photometry_quality": 0.1,
+                }
+            ),
+            _with_radec_r_pc(
+                {
+                    "source": "gaia",
+                    "source_id": 1010,
+                    "x_icrs_pc": -1.0,
+                    "y_icrs_pc": 0.0,
+                    "z_icrs_pc": 0.0,
+                    "mag_abs": 4.0,
+                    "teff": 5300.0,
+                    "quality_flags": 1,
+                    "astrometry_quality": 0.2,
+                    "photometry_quality": 0.1,
+                }
+            ),
         ]
     )
     _write_parquet(gaia_df[OUTPUT_COLS], gaia_dir / "b1.parquet")
 
     hip_df = pd.DataFrame(
         [
-            {
-                "source": "hip",
-                "source_id": 2001,
-                "x_icrs_pc": 1.0,
-                "y_icrs_pc": 0.0,
-                "z_icrs_pc": 0.0,
-                "mag_abs": 1.5,
-                "teff": 6000.0,
-                "quality_flags": 2,
-                "astrometry_quality": 0.3,
-                "photometry_quality": 0.2,
-            },
-            {
-                "source": "hip",
-                "source_id": 2002,
-                "x_icrs_pc": 0.0,
-                "y_icrs_pc": 1.0,
-                "z_icrs_pc": 0.0,
-                "mag_abs": 2.5,
-                "teff": 6100.0,
-                "quality_flags": 2,
-                "astrometry_quality": 0.2,
-                "photometry_quality": 0.2,
-            },
-            {
-                "source": "hip",
-                "source_id": 2003,
-                "x_icrs_pc": 0.0,
-                "y_icrs_pc": 0.0,
-                "z_icrs_pc": -1.0,
-                "mag_abs": 3.5,
-                "teff": 6200.0,
-                "quality_flags": 2,
-                "astrometry_quality": 0.5,
-                "photometry_quality": 0.2,
-            },
-            {
-                "source": "hip",
-                "source_id": 2004,
-                "x_icrs_pc": 1.0,
-                "y_icrs_pc": 1.0,
-                "z_icrs_pc": 0.0,
-                "mag_abs": 4.5,
-                "teff": 6300.0,
-                "quality_flags": 2,
-                "astrometry_quality": 0.1,
-                "photometry_quality": 0.2,
-            },
-            {
-                "source": "hip",
-                "source_id": 2010,
-                "x_icrs_pc": 0.5,
-                "y_icrs_pc": -0.5,
-                "z_icrs_pc": 0.0,
-                "mag_abs": 5.0,
-                "teff": 6400.0,
-                "quality_flags": 2,
-                "astrometry_quality": 0.2,
-                "photometry_quality": 0.2,
-            },
+            _with_radec_r_pc(
+                {
+                    "source": "hip",
+                    "source_id": 2001,
+                    "x_icrs_pc": 1.0,
+                    "y_icrs_pc": 0.0,
+                    "z_icrs_pc": 0.0,
+                    "mag_abs": 1.5,
+                    "teff": 6000.0,
+                    "quality_flags": 2,
+                    "astrometry_quality": 0.3,
+                    "photometry_quality": 0.2,
+                }
+            ),
+            _with_radec_r_pc(
+                {
+                    "source": "hip",
+                    "source_id": 2002,
+                    "x_icrs_pc": 0.0,
+                    "y_icrs_pc": 1.0,
+                    "z_icrs_pc": 0.0,
+                    "mag_abs": 2.5,
+                    "teff": 6100.0,
+                    "quality_flags": 2,
+                    "astrometry_quality": 0.2,
+                    "photometry_quality": 0.2,
+                }
+            ),
+            _with_radec_r_pc(
+                {
+                    "source": "hip",
+                    "source_id": 2003,
+                    "x_icrs_pc": 0.0,
+                    "y_icrs_pc": 0.0,
+                    "z_icrs_pc": -1.0,
+                    "mag_abs": 3.5,
+                    "teff": 6200.0,
+                    "quality_flags": 2,
+                    "astrometry_quality": 0.5,
+                    "photometry_quality": 0.2,
+                }
+            ),
+            _with_radec_r_pc(
+                {
+                    "source": "hip",
+                    "source_id": 2004,
+                    "x_icrs_pc": 1.0,
+                    "y_icrs_pc": 1.0,
+                    "z_icrs_pc": 0.0,
+                    "mag_abs": 4.5,
+                    "teff": 6300.0,
+                    "quality_flags": 2,
+                    "astrometry_quality": 0.1,
+                    "photometry_quality": 0.2,
+                }
+            ),
+            _with_radec_r_pc(
+                {
+                    "source": "hip",
+                    "source_id": 2010,
+                    "x_icrs_pc": 0.5,
+                    "y_icrs_pc": -0.5,
+                    "z_icrs_pc": 0.0,
+                    "mag_abs": 5.0,
+                    "teff": 6400.0,
+                    "quality_flags": 2,
+                    "astrometry_quality": 0.2,
+                    "photometry_quality": 0.2,
+                }
+            ),
         ]
     )
     _write_parquet(hip_df[OUTPUT_COLS], hip_path)
@@ -158,32 +193,40 @@ def test_run_merge_streaming_with_overrides_and_missing_partners(tmp_path: Path)
     overrides_df = pd.DataFrame(
         [
             {
-                "source": "hip",
-                "source_id": "2004",
-                "x_icrs_pc": 2.0,
-                "y_icrs_pc": 0.0,
-                "z_icrs_pc": 0.0,
-                "mag_abs": 10.0,
-                "teff": 7000.0,
-                "quality_flags": 10,
-                "astrometry_quality": 0.0,
-                "photometry_quality": 0.0,
+                **_with_radec_r_pc(
+                    {
+                        "source": "hip",
+                        "source_id": "2004",
+                        "x_icrs_pc": 2.0,
+                        "y_icrs_pc": 0.0,
+                        "z_icrs_pc": 0.0,
+                        "mag_abs": 10.0,
+                        "teff": 7000.0,
+                        "quality_flags": 10,
+                        "astrometry_quality": 0.0,
+                        "photometry_quality": 0.0,
+                    }
+                ),
                 "override_id": "ov.hip.replace",
                 "action": "replace",
                 "override_reason": "test_replace_hip",
                 "override_policy_version": "v1",
             },
             {
-                "source": "gaia",
-                "source_id": "1003",
-                "x_icrs_pc": 0.0,
-                "y_icrs_pc": 2.0,
-                "z_icrs_pc": 0.0,
-                "mag_abs": 11.0,
-                "teff": 7100.0,
-                "quality_flags": 10,
-                "astrometry_quality": 0.0,
-                "photometry_quality": 0.0,
+                **_with_radec_r_pc(
+                    {
+                        "source": "gaia",
+                        "source_id": "1003",
+                        "x_icrs_pc": 0.0,
+                        "y_icrs_pc": 2.0,
+                        "z_icrs_pc": 0.0,
+                        "mag_abs": 11.0,
+                        "teff": 7100.0,
+                        "quality_flags": 10,
+                        "astrometry_quality": 0.0,
+                        "photometry_quality": 0.0,
+                    }
+                ),
                 "override_id": "ov.gaia.replace_missing_target",
                 "action": "replace",
                 "override_reason": "test_replace_gaia_missing_target",
@@ -195,6 +238,9 @@ def test_run_merge_streaming_with_overrides_and_missing_partners(tmp_path: Path)
                 "x_icrs_pc": pd.NA,
                 "y_icrs_pc": pd.NA,
                 "z_icrs_pc": pd.NA,
+                "ra_deg": pd.NA,
+                "dec_deg": pd.NA,
+                "r_pc": pd.NA,
                 "mag_abs": pd.NA,
                 "teff": pd.NA,
                 "quality_flags": pd.NA,
@@ -206,16 +252,20 @@ def test_run_merge_streaming_with_overrides_and_missing_partners(tmp_path: Path)
                 "override_policy_version": "v1",
             },
             {
-                "source": "manual",
-                "source_id": "sun",
-                "x_icrs_pc": 0.0,
-                "y_icrs_pc": 0.0,
-                "z_icrs_pc": 0.0,
-                "mag_abs": 4.83,
-                "teff": 5772.0,
-                "quality_flags": 10,
-                "astrometry_quality": 0.0,
-                "photometry_quality": 0.0,
+                **_with_radec_r_pc(
+                    {
+                        "source": "manual",
+                        "source_id": "sun",
+                        "x_icrs_pc": 0.0,
+                        "y_icrs_pc": 0.0,
+                        "z_icrs_pc": 0.0,
+                        "mag_abs": 4.83,
+                        "teff": 5772.0,
+                        "quality_flags": 10,
+                        "astrometry_quality": 0.0,
+                        "photometry_quality": 0.0,
+                    }
+                ),
                 "override_id": "ov.manual.add_sun",
                 "action": "add",
                 "override_reason": "test_add",
@@ -242,8 +292,8 @@ def test_run_merge_streaming_with_overrides_and_missing_partners(tmp_path: Path)
     assert len(merged_df) == 7
     assert merged_df["source_id"].is_unique
     assert set(merged_df["source_id"].astype(str)) == {
-        "1001",
-        "1002",
+        "2001",
+        "2002",
         "1003",
         "1010",
         "2004",
@@ -251,8 +301,12 @@ def test_run_merge_streaming_with_overrides_and_missing_partners(tmp_path: Path)
         "sun",
     }
 
-    manual_rows = merged_df[merged_df["catalog_source"] == "manual"]
-    assert set(manual_rows["source_id"].astype(str)) == {"1003", "2004", "sun"}
+    manual_add = merged_df[merged_df["source"] == "manual"]
+    assert set(manual_add["source_id"].astype(str)) == {"sun"}
+
+    matched_2001 = merged_df.loc[merged_df["source_id"].astype(str) == "2001"].iloc[0]
+    assert matched_2001["source"] == "hip"
+    assert matched_2001["mag_abs"] == pytest.approx(1.0)
 
     assert report.matched_pairs_scored == 2
     assert report.matched_winner_gaia == 2
@@ -290,18 +344,20 @@ def test_run_merge_rejects_drop_override_with_payload(tmp_path: Path):
     _write_parquet(
         pd.DataFrame(
             [
-                {
-                    "source": "hip",
-                    "source_id": 2001,
-                    "x_icrs_pc": 1.0,
-                    "y_icrs_pc": 0.0,
-                    "z_icrs_pc": 0.0,
-                    "mag_abs": 1.5,
-                    "teff": 6000.0,
-                    "quality_flags": 2,
-                    "astrometry_quality": 0.3,
-                    "photometry_quality": 0.2,
-                }
+                _with_radec_r_pc(
+                    {
+                        "source": "hip",
+                        "source_id": 2001,
+                        "x_icrs_pc": 1.0,
+                        "y_icrs_pc": 0.0,
+                        "z_icrs_pc": 0.0,
+                        "mag_abs": 1.5,
+                        "teff": 6000.0,
+                        "quality_flags": 2,
+                        "astrometry_quality": 0.3,
+                        "photometry_quality": 0.2,
+                    }
+                )
             ]
         )[OUTPUT_COLS],
         hip_path,
@@ -319,6 +375,9 @@ def test_run_merge_rejects_drop_override_with_payload(tmp_path: Path):
                     "x_icrs_pc": 99.0,
                     "y_icrs_pc": pd.NA,
                     "z_icrs_pc": pd.NA,
+                    "ra_deg": pd.NA,
+                    "dec_deg": pd.NA,
+                    "r_pc": pd.NA,
                     "mag_abs": pd.NA,
                     "teff": pd.NA,
                     "quality_flags": pd.NA,

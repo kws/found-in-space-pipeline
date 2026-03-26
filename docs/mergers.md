@@ -82,7 +82,7 @@ Required:
 
 Optional:
 
-- A provisional Gaia-import mapping sidecar (`gaia_source_id` ↔ `hip_source_id`, when Gaia input includes `hip`) to reduce re-scan cost. This artifact is advisory and can be superseded by merge-time crossmatch/override resolution.
+- A provisional Gaia-import mapping sidecar (when Gaia input includes HIP identifiers) to reduce re-scan cost. This artifact is advisory and can be superseded by merge-time crossmatch/override resolution.
 
 ---
 
@@ -125,6 +125,15 @@ Each override row should carry at least:
 - Target key to match existing rows: `source` + `source_id` (crossmatch partner lookup is handled by the merger; see "Pair-aware override resolution")
 - For `add` / `replace`: fields required by the merged schema (coordinates, `mag_abs`, etc.) or pointers to a curated row definition
 
+Override YAMLs may also include an **`identifiers`** block that populates the identifiers sidecar for that star. This is how manual stars (e.g. the Sun) receive labels:
+
+```yaml
+identifiers:
+  proper_name: Sun
+```
+
+Supported identifier fields: `gaia_source_id`, `hip_id`, `hd`, `bayer`, `flamsteed`, `constellation`, `proper_name`. Only fields with a value need be listed. The identifiers pipeline reads these blocks and merges them into `identifiers_map.parquet` alongside Vizier-derived entries.
+
 ### Override target key
 
 Override targeting uses the compound star key:
@@ -157,12 +166,12 @@ Override YAML targets a **single** row by (`source`, `source_id`). The merger re
 
 - If a `replace` or `drop` override targets one side of a crossmatch-linked pair, the **entire pair** is resolved by the override. The partner row from the other catalog is suppressed — it does not appear as an unmatched row or compete in quality scoring.
 - Override authors do **not** need to supply the partner's ID. The crossmatch map already contains the relationship, and requiring manual partner lookups would be error-prone and redundant.
-- The merge decisions sidecar (M5) records both the override action and the suppressed partner, e.g.: "HIP 71683 replaced by `manual.alpha_cen_a.replace.v1`; Gaia counterpart `<gaia_source_id>` suppressed via crossmatch."
+- The merge decisions sidecar (M5) records both the override action and the suppressed partner, e.g.: "HIP 71683 replaced by `manual.alpha_cen_a.replace.v1`; Gaia counterpart suppressed via crossmatch."
 - For `add` overrides (which target `source=manual`), no crossmatch lookup applies — the row is inserted directly.
 
 ### Magnitude-limited Gaia subsets and missing crossmatch partners
 
-Gaia data may be imported with a magnitude limit (`--mag-limit`), so a `gaia_source_id` present in the crossmatch table may have **no corresponding row** in the actual Gaia batch files. The merger must handle this gracefully in both override and non-override paths.
+Gaia data may be imported with a magnitude limit (`--mag-limit`), so a Gaia `source_id` present in the crossmatch table may have **no corresponding row** in the actual Gaia batch files. The merger must handle this gracefully in both override and non-override paths.
 
 **Non-override path (matched pairs with a missing side):**
 
@@ -187,16 +196,19 @@ Gaia data may be imported with a magnitude limit (`--mag-limit`), so a `gaia_sou
 
 ## Canonical identity
 
-Each merged output row must have one canonical `source_id` used by sidecars and forward lookups.
+Each merged output row is identified by the compound key `(source, source_id)`. This pair is the single canonical identity used by sidecars and forward lookups.
 
-Policy (extend as needed; namespaces must be consistent before Stage 00):
+### Identity rules
 
-- **Gaia-selected rows**: `source_id = gaia_source_id` (or namespaced equivalent).
-- **Hipparcos-selected rows** without a Gaia counterpart: `source_id = hip_source_id` in the Hipparcos namespace.
-- **Manual-only rows** (`add`): `source_id` in a dedicated namespace (e.g. prefixed or separate ID range) so collisions with Gaia/HIP numeric IDs cannot occur.
-- **Replaced rows**: canonical `source_id` is always the **original target's** `source` / `source_id`. The override swaps the payload (coordinates, photometry, etc.) but does not remap identity.
+- **Matched pairs** (Gaia + Hipparcos linked by crossmatch): always `source = "hip"`, `source_id = <hip_number>`. The Hipparcos identifier is preferred because all human-facing identifiers (HD, Bayer, Flamsteed, proper names) are keyed by HIP number in the identifiers pipeline. The winning catalog's astrometry/photometry is used for the row's physical data, but the identity is always Hipparcos.
+- **Gaia-only** (unmatched): `source = "gaia"`, `source_id = <gaia_dr3_id>`.
+- **Hipparcos-only** (unmatched, no crossmatch partner): `source = "hip"`, `source_id = <hip_number>`.
+- **Manual adds**: `source = "manual"`, `source_id = <manual_id>` (e.g. `"sun"`). String-valued manual IDs cannot collide with numeric catalog IDs.
+- **Replaced rows**: canonical identity is always the **original target's** `(source, source_id)`. The override swaps the payload (coordinates, photometry, etc.) but does not remap identity.
 
-`catalog_source` on the dense row indicates the **provenance of the chosen astrometry/photometry** for that row: `gaia`, `hip`, or `manual` (or equivalent enum).
+### No separate ID columns
+
+The dense merged table does **not** carry `gaia_source_id`, `hip_source_id`, or `catalog_source` as additional columns. The compound key `(source, source_id)` is the only identity on each row. Cross-catalog identifiers (e.g. the Gaia DR3 source ID for a Hipparcos star) are stored in the **identifiers sidecar**, not on the dense table. Data provenance (which catalog supplied the winning astrometry/photometry) is recorded in the **merge decisions** sidecar (M5).
 
 ---
 
@@ -234,8 +246,8 @@ Merged dense output must not contain duplicate canonical `source_id`.
 
 Persist provenance for:
 
-- Each **matched pair** decision: `gaia_source_id`, `hip_source_id`, winner catalog, score components (or aggregate), tie-break reason if applicable.
-- Each **override**: `override_id`, `action`, keys, `override_reason`, `override_policy_version`, and link to canonical `source_id` after merge.
+- Each **matched pair** decision: the Gaia and Hipparcos identifiers involved, winner catalog, score components (or aggregate), tie-break reason if applicable.
+- Each **override**: `override_id`, `action`, target key `(source, source_id)`, `override_reason`, `override_policy_version`.
 
 This sidecar is bounded by the crossmatch table (~100K rows) plus overrides (~tens of rows). **Unmatched rows are not recorded per-row** — they are counted in the aggregate merge report only. At ~1.5 billion stars, any per-row accumulation outside the matched-pair and override sets would exhaust memory.
 
@@ -281,20 +293,24 @@ Must satisfy Stage 00 requirements:
 - `mag_abs`
 - optional `teff`
 
-Should include identity fields:
+Must include identity:
 
-- `source_id` (canonical, required)
-- `gaia_source_id` (nullable)
-- `hip_source_id` (nullable)
-- `catalog_source` (`gaia`, `hip`, or `manual`)
+- `source` (catalog namespace: `"gaia"`, `"hip"`, or `"manual"`)
+- `source_id` (canonical identifier within that namespace)
 
-Should also include lightweight spatial helpers needed for 2D sharding:
+Must include lightweight spatial helpers needed for 2D sharding:
 
 - `ra_deg`
 - `dec_deg`
 - `r_pc`
 
-**Do not** require HD, Bayer, or other rare designations on every row of the dense table. Those belong in the **identifiers sidecar** produced by the identifiers pipeline (`fis-pipeline identifiers prepare`), joinable via `hip_source_id`.
+Must include quality and provenance metadata:
+
+- `quality_flags`
+- `astrometry_quality`
+- `photometry_quality`
+
+**Do not** carry cross-catalog IDs, HD, Bayer, or other rare designations on the dense table. Those belong in the **identifiers sidecar** produced by the identifiers pipeline, joinable via `(source, source_id)`.
 
 Extra columns needed for Stage 00 must survive unchanged where Stage 00 uses `SELECT *` on shards.
 
@@ -304,7 +320,9 @@ Within-shard ordering (e.g. `r_pc` ascending for radial octree traversal) is **d
 
 ### Sidecars
 
-The merger produces the **merge decisions** sidecar (M5), keyed by matched pair or override. Designation and identifier metadata is handled by the **identifiers pipeline** (`data/processed/identifiers_map.parquet`), which is a wide table keyed by `hip_source_id` with columns `hd`, `bayer`, `fl`, `cst`, `proper_name`. Downstream consumers join it via `hip_source_id` on the dense merged table.
+The merger produces the **merge decisions** sidecar (M5), keyed by matched pair or override.
+
+Designation and identifier metadata is handled by the **identifiers pipeline** (`data/processed/identifiers_map.parquet`), which is a wide table keyed by the compound key `(source, source_id)`. It includes cross-catalog identifiers (e.g. the Gaia DR3 source ID for Hipparcos stars, obtained via the crossmatch table), catalog designations (`hd`, `bayer`, `flamsteed`, `constellation`), and proper names. Manual override stars that define an `identifiers` block in their YAML are included in the same map. Downstream consumers join the identifiers map via `(source, source_id)` on the dense merged table.
 
 ---
 
@@ -321,7 +339,7 @@ At ~1.5 billion rows, post-hoc full-catalog scans are not practical. Validations
 
 ### By construction (no runtime check needed)
 
-5. **No duplicate canonical `source_id`** — guaranteed by the algorithm: Gaia source_ids are unique within Gaia (catalog guarantee), HIP source_ids are unique within HIP, matched pairs emit exactly one winner, and `manual` namespace IDs are string-valued and cannot collide with numeric catalog IDs.
+5. **No duplicate canonical `(source, source_id)`** — guaranteed by the algorithm: Gaia source_ids are unique within Gaia (catalog guarantee), HIP source_ids are unique within HIP, matched pairs always use the HIP identity and emit exactly one winner, and `manual` namespace IDs are string-valued and cannot collide with numeric catalog IDs.
 6. **All matched pairs resolved** — the streaming pass processes every Gaia row encountered in the batch files, and the HIP flush processes every remaining HIP row. Under magnitude-limited Gaia imports, many crossmatch entries will reference absent Gaia rows; these are not matched pairs (see "Magnitude-limited Gaia subsets") and require no resolution.
 7. **Non-null geometry/magnitude** — upstream pipeline responsibility. The Gaia and Hipparcos pipelines validate their own output; the merger does not re-check per-row data quality on 1.5B rows.
 
@@ -343,7 +361,7 @@ The merger must process ~1.5 billion Gaia rows without materialising the full ca
 2. For each Gaia batch file:
    - Read the batch into memory (each batch is a manageable size).
    - For each Gaia row: check if it is part of a matched pair (crossmatch lookup) or targeted by an override.
-     - **Matched pair, no override**: compare `astrometry_quality` with the HIP partner. Emit the winner. Mark the HIP row as resolved.
+     - **Matched pair, no override**: compare `astrometry_quality` with the HIP partner. Emit the winner's physical data under the HIP identity (`source = "hip"`, `source_id = <hip_number>`). Mark the HIP row as resolved.
      - **Override target**: apply the override. Mark the pair (if any) as resolved.
      - **Unmatched Gaia**: emit as-is.
    - Compute HEALPix pixel from the winning row's (`ra_deg`, `dec_deg`) and write to the appropriate output directory.
@@ -380,4 +398,4 @@ The following were resolved before the first merger implementation:
 - A "merge plan now, apply later" strategy adds pipeline complexity with little benefit; current recommendation is direct merge after catalog preprocessing and before Stage 00.
 - Full reverse lookup indices remain serving-layer artifacts.
 - HEALPix level for **serving shards** may differ from HEALPix used only for **Gaia download batching**; document the level used for merged output.
-- Gaia-import sidecars can provide convenient `gaia_source_id` ↔ `hip_source_id` hints, but merge outputs remain the canonical source of truth for identity/provenance after overrides and winner selection.
+- Gaia-import sidecars can provide convenient Gaia↔HIP mapping hints, but merge outputs remain the canonical source of truth for identity after overrides and winner selection.

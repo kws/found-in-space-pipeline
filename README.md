@@ -49,7 +49,7 @@ Entry point: **`fis-pipeline`** (or `python -m foundinspace.pipeline`).
 | `fis-pipeline hip download` | Download Hipparcos New Reduction catalog (`I/311/hip2`) to ECSV (default: `data/catalogs/hipparcos2.ecsv`). |
 | `fis-pipeline hip build` | Run `hip download` (download-if-needed) then `hip prepare` in one step. |
 | `fis-pipeline identifiers download` | Download identifier source catalogs (`I/239/hip_main`, `IV/27A/catalog`, `IV/27A/table3`) to ECSV files in `data/catalogs/`. |
-| `fis-pipeline identifiers prepare` | Build a wide identifiers sidecar parquet keyed by `hip_source_id` (default: `data/processed/identifiers_map.parquet`). |
+| `fis-pipeline identifiers prepare` | Build a wide identifiers sidecar parquet keyed by `(source, source_id)` (default: `data/processed/identifiers_map.parquet`). |
 | `fis-pipeline identifiers build` | Run `identifiers download` then `identifiers prepare` in one command. |
 | `fis-pipeline merge prepare` | Stream-merge Gaia + Hipparcos + crossmatch + overrides into HEALPix-partitioned Parquet under `data/processed/merged/healpix/{pixel}/`, and write `merge_report.json` plus `merge_decisions.parquet`. |
 | `fis-pipeline overrides prepare` | Build merger-ready overrides Parquet from packaged YAML (`OUTPUT_COLS` + override metadata; default: `data/processed/overrides.parquet`). |
@@ -98,20 +98,23 @@ CLI flags still take precedence. Output directories are auto-created as needed.
 
 **Identifiers sidecar schema (`identifiers prepare`)**
 
-The sidecar is intentionally **wide** and small, with one row per HIP identifier:
+The sidecar is intentionally **wide** and small, keyed by the compound key `(source, source_id)`:
 
-- `hip_source_id` (`uint64`)
-- `hd` (`Int64`, nullable)
-- `bayer` (`string`, nullable display value such as `alpha Cas`)
-- `fl` (`Int64`, nullable Flamsteed number from IV/27A)
-- `cst` (`string`, nullable constellation abbreviation from IV/27A)
-- `proper_name` (`string`, nullable; first proper name by HD from IV/27A/table3)
+- `source` (`string` — catalog namespace: `"hip"`, `"manual"`, etc.)
+- `source_id` (`string` — identifier within that namespace)
+- `gaia_source_id` (`Int64`, nullable — Gaia DR3 source identifier, populated for HIP stars via crossmatch)
+- `hip_id` (`Int64`, nullable — Hipparcos catalog number)
+- `hd` (`Int64`, nullable — Henry Draper catalog number)
+- `bayer` (`string`, nullable — display value such as `"alpha Cas"`)
+- `flamsteed` (`Int64`, nullable — Flamsteed number from IV/27A)
+- `constellation` (`string`, nullable — constellation abbreviation from IV/27A)
+- `proper_name` (`string`, nullable — proper name from IV/27A/table3 or override YAML)
 
-Rows are emitted only when at least one of `bayer` or `proper_name` is present.
+Sources: Hipparcos-keyed entries are derived from Vizier catalogs (`I/239/hip_main`, `IV/27A`). The Gaia DR3 source ID for HIP stars comes from the crossmatch table (`gaia_hip_map.parquet`) when present (CLI: `--crossmatch`, default `data/processed/gaia_hip_map.parquet` if the file exists). Manual override stars with an `identifiers` block in their YAML are merged from the packaged overrides directory or `--overrides-data-dir`.
 
 **Overrides table schema (`overrides prepare`)**
 
-One row per YAML override star: same columns as `OUTPUT_COLS` plus `override_id`, `action`, `override_reason`, `override_policy_version`. Non-drop rows set `quality_flags` with `DIST_SRC_OVERRIDE` (see `constants.py`) and `FLAG_DIST_VALID`; `astrometry_quality` and `photometry_quality` are `0.0` (placeholders). `drop` rows keep `source` / `source_id` for targeting and null the remaining `OUTPUT_COLS` fields. `source_id` is stored as string for consistent merger matching.
+One row per YAML override star: same columns as `OUTPUT_COLS` plus `override_id`, `action`, `override_reason`, `override_policy_version`. Non-drop rows set `quality_flags` with `DIST_SRC_OVERRIDE` (see `constants.py`) and `FLAG_DIST_VALID`; `astrometry_quality` and `photometry_quality` are `0.0` (placeholders). `drop` rows keep `source` / `source_id` for targeting and null the remaining `OUTPUT_COLS` fields (including `ra_deg`, `dec_deg`, `r_pc`). `source_id` is stored as string for consistent merger matching.
 
 ## Pipeline stages (Gaia)
 

@@ -28,7 +28,7 @@ Recommended outputs:
 - `hip_hd.ecsv` (HIP→HD from `I/239/hip_main`).
 - `iv27a_catalog.ecsv` (`HIP`, `HD`, `Bayer`, `Fl`, `Cst` from `IV/27A/catalog`).
 - `iv27a_proper_names.ecsv` (`HD`→proper names from `IV/27A/table3`).
-- `identifiers_map.parquet` (wide sidecar keyed by `hip_source_id`).
+- `identifiers_map.parquet` (wide sidecar keyed by `(source, source_id)`).
 - `gaia-l3-all-sky-count.csv` (L3 tile counts + manual status).
 - `gaia_batch_plan.csv` (optional: batch assignment for each `hp3`).
 - `gaia_batch_<label>.vot.gz` (one file per Gaia download batch).

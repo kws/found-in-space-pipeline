@@ -26,6 +26,9 @@ stars:
     mag_band: Johnson_V
     teff: 5772
 
+    identifiers:
+      proper_name: Sol
+
     notes: >
       The astrometric coordinates (ra_deg/dec_deg/r_pc and x/y/z) are manual
       deterministic catalogue conventions for a synthetic origin object used by

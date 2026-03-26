@@ -16,6 +16,9 @@ def test_run_pipeline_batch_still_emits_output_cols(monkeypatch):
         out["x_icrs_pc"] = [0.0, 1.0]
         out["y_icrs_pc"] = [0.0, 1.0]
         out["z_icrs_pc"] = [0.0, 1.0]
+        out["ra_deg"] = [0.0, 45.0]
+        out["dec_deg"] = [0.0, 0.0]
+        out["r_pc"] = [0.0, 1.41421356]
         return out
 
     def _mag_abs(df: pd.DataFrame) -> pd.DataFrame:

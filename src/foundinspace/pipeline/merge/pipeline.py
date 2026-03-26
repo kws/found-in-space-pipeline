@@ -22,15 +22,8 @@ _LOG = logging.getLogger(__name__)
 MERGE_POLICY_VERSION = "v1"
 MERGE_BATCH_SIZE = 1_000_000
 
-MERGED_OUTPUT_COLS = [
-    *OUTPUT_COLS,
-    "gaia_source_id",
-    "hip_source_id",
-    "catalog_source",
-    "ra_deg",
-    "dec_deg",
-    "r_pc",
-]
+# Merged HEALPix shards use the same schema as per-catalog OUTPUT_COLS (canonical identity only).
+MERGED_OUTPUT_COLS = list(OUTPUT_COLS)
 
 DECISION_COLS = [
     "decision_type",
@@ -112,52 +105,24 @@ def _choose_matched_winner(gaia_row: dict[str, Any], hip_row: dict[str, Any]) ->
     return "gaia", "prefer_gaia"
 
 
-def _xyz_to_radec(df: pd.DataFrame) -> pd.DataFrame:
-    """Add r_pc, ra_deg, dec_deg from Cartesian coordinates."""
-    x = df["x_icrs_pc"].to_numpy(dtype=float)
-    y = df["y_icrs_pc"].to_numpy(dtype=float)
-    z = df["z_icrs_pc"].to_numpy(dtype=float)
-    r = np.sqrt(x * x + y * y + z * z)
-
-    ra = (np.degrees(np.arctan2(y, x)) + 360.0) % 360.0
-    dec = np.zeros_like(r)
-    nonzero = r > 0.0
-    dec[nonzero] = np.degrees(np.arcsin(np.clip(z[nonzero] / r[nonzero], -1.0, 1.0)))
-    dec[~nonzero] = 0.0
-    ra[~nonzero] = 0.0
-
-    df["r_pc"] = r
-    df["ra_deg"] = ra
-    df["dec_deg"] = dec
-    return df
-
-
 def _output_row(
     payload: dict[str, Any],
     *,
-    catalog_source: str,
-    gaia_source_id: int | None,
-    hip_source_id: int | None,
+    canonical_source: str | None = None,
+    canonical_source_id: str | None = None,
 ) -> dict[str, Any]:
+    """Build one merged row from a payload dict that already satisfies OUTPUT_COLS.
+
+    For matched Gaia↔HIP pairs where Gaia wins astrometry, pass canonical_source='hip'
+    and canonical_source_id=str(hip_id) so identity stays Hipparcos-keyed.
+    """
     row = {col: payload[col] for col in OUTPUT_COLS}
+    if canonical_source is not None:
+        row["source"] = canonical_source
+    if canonical_source_id is not None:
+        row["source_id"] = canonical_source_id
     row["source"] = str(row["source"])
     row["source_id"] = str(row["source_id"])
-    row["gaia_source_id"] = str(gaia_source_id) if gaia_source_id is not None else pd.NA
-    row["hip_source_id"] = str(hip_source_id) if hip_source_id is not None else pd.NA
-    row["catalog_source"] = catalog_source
-    x = float(row["x_icrs_pc"])
-    y = float(row["y_icrs_pc"])
-    z = float(row["z_icrs_pc"])
-    r = float(math.sqrt(x * x + y * y + z * z))
-    if r > 0.0:
-        ra = (math.degrees(math.atan2(y, x)) + 360.0) % 360.0
-        dec = math.degrees(math.asin(max(-1.0, min(1.0, z / r))))
-    else:
-        ra = 0.0
-        dec = 0.0
-    row["r_pc"] = r
-    row["ra_deg"] = ra
-    row["dec_deg"] = dec
     return row
 
 
@@ -165,10 +130,6 @@ def _prepare_gaia_unmatched(df: pd.DataFrame) -> pd.DataFrame:
     out = df[OUTPUT_COLS].copy()
     out["source"] = "gaia"
     out["source_id"] = out["source_id"].astype("uint64").astype("string")
-    out["gaia_source_id"] = out["source_id"]
-    out["hip_source_id"] = pd.NA
-    out["catalog_source"] = "gaia"
-    out = _xyz_to_radec(out)
     return out[MERGED_OUTPUT_COLS]
 
 
@@ -486,14 +447,7 @@ def run_merge(
                     winner_catalog = ""
                     winner_source_id = ""
                     if action == "replace":
-                        special_out_rows.append(
-                            _output_row(
-                                override,
-                                catalog_source="manual",
-                                gaia_source_id=gaia_id if gaia_id is not None else None,
-                                hip_source_id=hip_id if hip_id is not None else None,
-                            )
-                        )
+                        special_out_rows.append(_output_row(override))
                         report.override_replace_applied += 1
                         winner_catalog = "manual"
                         winner_source_id = str(override["source_id"])
@@ -528,14 +482,7 @@ def run_merge(
                     continue
 
                 if hip_rec is None or hip_id in resolved_hip_ids:
-                    special_out_rows.append(
-                        _output_row(
-                            gaia_rec,
-                            catalog_source="gaia",
-                            gaia_source_id=gaia_id,
-                            hip_source_id=hip_id,
-                        )
-                    )
+                    special_out_rows.append(_output_row(gaia_rec))
                     report.unmatched_gaia += 1
                     continue
 
@@ -543,18 +490,12 @@ def run_merge(
                 if winner_catalog == "gaia":
                     winner_row = _output_row(
                         gaia_rec,
-                        catalog_source="gaia",
-                        gaia_source_id=gaia_id,
-                        hip_source_id=hip_id,
+                        canonical_source="hip",
+                        canonical_source_id=str(hip_id),
                     )
                     report.matched_winner_gaia += 1
                 else:
-                    winner_row = _output_row(
-                        hip_rec,
-                        catalog_source="hip",
-                        gaia_source_id=gaia_id,
-                        hip_source_id=hip_id,
-                    )
+                    winner_row = _output_row(hip_rec)
                     report.matched_winner_hip += 1
                 special_out_rows.append(winner_row)
                 resolved_hip_ids.add(int(hip_id))
@@ -613,14 +554,7 @@ def run_merge(
             resolved_hip_ids.add(hip_id)
             action = str(override["action"])
             if action == "replace":
-                hip_out_rows.append(
-                    _output_row(
-                        override,
-                        catalog_source="manual",
-                        gaia_source_id=gaia_id if gaia_id is not None else None,
-                        hip_source_id=hip_id,
-                    )
-                )
+                hip_out_rows.append(_output_row(override))
                 report.override_replace_applied += 1
             elif action == "drop":
                 report.override_drop_applied += 1
@@ -651,14 +585,7 @@ def run_merge(
             )
             continue
 
-        hip_out_rows.append(
-            _output_row(
-                hip_rec,
-                catalog_source="hip",
-                gaia_source_id=gaia_id if gaia_id is not None else None,
-                hip_source_id=hip_id,
-            )
-        )
+        hip_out_rows.append(_output_row(hip_rec))
         report.unmatched_hip += 1
 
     if hip_out_rows:
@@ -685,14 +612,7 @@ def run_merge(
         if override_id in processed_override_ids:
             continue
         processed_override_ids.add(override_id)
-        add_rows.append(
-            _output_row(
-                ov,
-                catalog_source="manual",
-                gaia_source_id=None,
-                hip_source_id=None,
-            )
-        )
+        add_rows.append(_output_row(ov))
         report.override_add_applied += 1
         decisions.append(
             {

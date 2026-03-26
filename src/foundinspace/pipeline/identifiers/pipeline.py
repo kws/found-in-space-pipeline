@@ -1,9 +1,10 @@
-"""Prepare a wide star-identifier sidecar keyed by Hipparcos ID."""
+"""Prepare a wide star-identifier sidecar keyed by (source, source_id)."""
 
 from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -11,7 +12,21 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from astropy.table import Table
 
-IDENTIFIER_COLS = ["hip_source_id", "hd", "bayer", "fl", "cst", "proper_name"]
+# Parquet output: compound key + cross-catalog and display identifiers.
+IDENTIFIER_OUTPUT_COLS = [
+    "source",
+    "source_id",
+    "gaia_source_id",
+    "hip_id",
+    "hd",
+    "bayer",
+    "flamsteed",
+    "constellation",
+    "proper_name",
+]
+
+# Internal Vizier merge uses these working column names before reshaping.
+_VIZIER_WORK_COLS = ["hip_source_id", "hd", "bayer", "fl", "cst", "proper_name"]
 
 _BAYER_GREEK_MAP = {
     "alp": "alpha",
@@ -94,20 +109,23 @@ def _bayer_code_to_display(bayer_code: str | None, constellation: str | None) ->
     return bayer_root
 
 
-def _empty_identifiers() -> pd.DataFrame:
+def _empty_identifiers_out() -> pd.DataFrame:
     return pd.DataFrame(
         {
-            "hip_source_id": pd.Series(dtype="uint64"),
+            "source": pd.Series(dtype="string"),
+            "source_id": pd.Series(dtype="string"),
+            "gaia_source_id": pd.Series(dtype="Int64"),
+            "hip_id": pd.Series(dtype="Int64"),
             "hd": pd.Series(dtype="Int64"),
             "bayer": pd.Series(dtype="string"),
-            "fl": pd.Series(dtype="Int64"),
-            "cst": pd.Series(dtype="string"),
+            "flamsteed": pd.Series(dtype="Int64"),
+            "constellation": pd.Series(dtype="string"),
             "proper_name": pd.Series(dtype="string"),
         }
     )
 
 
-def _prepare_identifier_sidecar(
+def _prepare_vizier_identifier_rows(
     hip_hd_df: pd.DataFrame,
     iv27a_catalog_df: pd.DataFrame,
     iv27a_proper_names_df: pd.DataFrame,
@@ -165,11 +183,11 @@ def _prepare_identifier_sidecar(
     merged = merged.merge(hd_to_proper, on="hd", how="left")
     merged = merged.loc[
         merged["bayer"].notna() | merged["proper_name"].notna(),
-        IDENTIFIER_COLS,
+        _VIZIER_WORK_COLS,
     ].copy()
 
     if merged.empty:
-        return _empty_identifiers()
+        return _empty_identifiers_out()
 
     merged["hip_source_id"] = merged["hip_source_id"].astype("uint64")
     merged["hd"] = merged["hd"].astype("Int64")
@@ -178,8 +196,84 @@ def _prepare_identifier_sidecar(
     merged["cst"] = merged["cst"].astype("string")
     merged["proper_name"] = merged["proper_name"].astype("string")
 
-    merged = merged.sort_values(by="hip_source_id", kind="mergesort", ignore_index=True)
-    return merged
+    merged = merged.rename(columns={"fl": "flamsteed", "cst": "constellation"})
+    merged["source"] = pd.Series("hip", index=merged.index, dtype="string")
+    merged["source_id"] = merged["hip_source_id"].astype("string")
+    merged["hip_id"] = merged["hip_source_id"].astype("Int64")
+    merged = merged.drop(columns=["hip_source_id"])
+    merged["gaia_source_id"] = pd.Series(pd.NA, index=merged.index, dtype="Int64")
+    return merged[IDENTIFIER_OUTPUT_COLS]
+
+
+def _load_hip_to_gaia(crossmatch_parquet: Path) -> dict[int, int]:
+    df = pq.read_table(crossmatch_parquet).to_pandas()
+    if "gaia_source_id" not in df.columns or "hip_source_id" not in df.columns:
+        return {}
+    out: dict[int, int] = {}
+    for _, row in df[["gaia_source_id", "hip_source_id"]].iterrows():
+        try:
+            g = int(row["gaia_source_id"])
+            h = int(row["hip_source_id"])
+        except (TypeError, ValueError):
+            continue
+        out[h] = g
+    return out
+
+
+def _override_identifier_rows(data_dir: Path | None) -> pd.DataFrame:
+    from foundinspace.pipeline.overrides.loader import load_parsed_override_documents
+
+    rows: list[dict[str, Any]] = []
+    for doc in load_parsed_override_documents(data_dir=data_dir):
+        stars = doc.get("stars")
+        if not isinstance(stars, list):
+            continue
+        for star in stars:
+            if not isinstance(star, dict):
+                continue
+            ident = star.get("identifiers")
+            if not ident or not isinstance(ident, dict):
+                continue
+            src = str(star.get("source", "")).strip().lower()
+            sid_raw = star.get("source_id")
+            if sid_raw is None:
+                continue
+            sid = str(sid_raw).strip()
+            row: dict[str, Any] = {
+                "source": src,
+                "source_id": sid,
+                "gaia_source_id": pd.NA,
+                "hip_id": pd.NA,
+                "hd": pd.NA,
+                "bayer": pd.NA,
+                "flamsteed": pd.NA,
+                "constellation": pd.NA,
+                "proper_name": pd.NA,
+            }
+            int_keys = ("gaia_source_id", "hip_id", "hd", "flamsteed")
+            str_keys = ("bayer", "constellation", "proper_name")
+            for k in int_keys:
+                if k in ident and ident[k] is not None and ident[k] != "":
+                    try:
+                        row[k] = int(ident[k])
+                    except (TypeError, ValueError):
+                        pass
+            for k in str_keys:
+                if k in ident and ident[k] is not None and str(ident[k]).strip() != "":
+                    row[k] = str(ident[k]).strip()
+            rows.append(row)
+
+    if not rows:
+        return _empty_identifiers_out()
+
+    df = pd.DataFrame(rows)
+    df["source"] = df["source"].astype("string")
+    df["source_id"] = df["source_id"].astype("string")
+    for c in ("gaia_source_id", "hip_id", "hd", "flamsteed"):
+        df[c] = pd.to_numeric(df[c], errors="coerce").astype("Int64")
+    for c in ("bayer", "constellation", "proper_name"):
+        df[c] = df[c].astype("string")
+    return df[IDENTIFIER_OUTPUT_COLS]
 
 
 def prepare_identifiers_sidecar(
@@ -188,6 +282,8 @@ def prepare_identifiers_sidecar(
     iv27a_proper_names_path: Path,
     output_path: Path,
     *,
+    crossmatch_parquet: Path | None = None,
+    overrides_data_dir: Path | None = None,
     overwrite: bool = False,
 ) -> Path:
     output_path = Path(output_path).expanduser()
@@ -201,13 +297,44 @@ def prepare_identifiers_sidecar(
                 " Run `fis-pipeline identifiers download` first."
             )
 
-    sidecar = _prepare_identifier_sidecar(
+    vizier_df = _prepare_vizier_identifier_rows(
         _read_ecsv(Path(hip_hd_path)),
         _read_ecsv(Path(iv27a_catalog_path)),
         _read_ecsv(Path(iv27a_proper_names_path)),
     )
 
+    hip_to_gaia: dict[int, int] = {}
+    if crossmatch_parquet is not None:
+        cm = Path(crossmatch_parquet).expanduser()
+        if cm.is_file():
+            hip_to_gaia = _load_hip_to_gaia(cm)
+
+    if not vizier_df.empty and hip_to_gaia:
+        hip_ids = pd.to_numeric(vizier_df["hip_id"], errors="coerce")
+        vizier_df = vizier_df.copy()
+        mapped = hip_ids.map(hip_to_gaia)
+        vizier_df["gaia_source_id"] = mapped.astype("Int64")
+
+    override_df = _override_identifier_rows(overrides_data_dir)
+
+    if vizier_df.empty and override_df.empty:
+        combined = _empty_identifiers_out()
+    elif override_df.empty:
+        combined = vizier_df
+    elif vizier_df.empty:
+        combined = override_df
+    else:
+        combined = pd.concat([vizier_df, override_df], ignore_index=True)
+        combined = combined.drop_duplicates(subset=["source", "source_id"], keep="last")
+
+    if not combined.empty:
+        combined = combined.sort_values(
+            by=["source", "source_id"],
+            kind="mergesort",
+            ignore_index=True,
+        )
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    table = pa.Table.from_pandas(sidecar[IDENTIFIER_COLS], preserve_index=False)
+    table = pa.Table.from_pandas(combined[IDENTIFIER_OUTPUT_COLS], preserve_index=False)
     pq.write_table(table, str(output_path), compression="zstd")
     return output_path

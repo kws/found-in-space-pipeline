@@ -9,7 +9,7 @@ from foundinspace.pipeline.identifiers.download import (
     DEFAULT_IV27A_PROPER_NAMES_OUTPUT,
 )
 from foundinspace.pipeline.identifiers.pipeline import prepare_identifiers_sidecar
-from foundinspace.pipeline.paths import IDENTIFIERS_MAP_OUTPUT
+from foundinspace.pipeline.paths import GAIA_HIP_MAP_OUTPUT, IDENTIFIERS_MAP_OUTPUT
 
 DEFAULT_SIDECAR_OUTPUT = IDENTIFIERS_MAP_OUTPUT
 
@@ -52,19 +52,41 @@ cli.add_command(download.main, name="download")
     show_default=True,
     help="Prepared identifiers sidecar output path (Parquet).",
 )
+@click.option(
+    "--crossmatch",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help=(
+        "Gaia↔HIP crossmatch Parquet (gaia_source_id, hip_source_id). "
+        f"Default: {GAIA_HIP_MAP_OUTPUT} if that file exists, else skip Gaia IDs on HIP rows."
+    ),
+)
+@click.option(
+    "--overrides-data-dir",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=None,
+    help="Override YAML directory (default: packaged overrides/data). Merges `identifiers` blocks.",
+)
 @click.option("--force", "-f", is_flag=True, default=False)
 def prepare(
     hip_hd: Path,
     catalog: Path,
     proper_names: Path,
     output: Path,
+    crossmatch: Path | None,
+    overrides_data_dir: Path | None,
     force: bool,
 ) -> None:
+    cm = crossmatch
+    if cm is None and GAIA_HIP_MAP_OUTPUT.is_file():
+        cm = GAIA_HIP_MAP_OUTPUT
     out = prepare_identifiers_sidecar(
         hip_hd,
         catalog,
         proper_names,
         output,
+        crossmatch_parquet=cm,
+        overrides_data_dir=overrides_data_dir,
         overwrite=force,
     )
     click.echo(f"Wrote wide identifier sidecar to {out.resolve()}")
@@ -100,12 +122,29 @@ def prepare(
     show_default=True,
     help="Prepared identifiers sidecar output path (Parquet).",
 )
+@click.option(
+    "--crossmatch",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help=(
+        "Gaia↔HIP crossmatch Parquet. "
+        f"Default: {GAIA_HIP_MAP_OUTPUT} if present."
+    ),
+)
+@click.option(
+    "--overrides-data-dir",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=None,
+    help="Override YAML directory (default: packaged overrides/data).",
+)
 @click.option("--force", "-f", is_flag=True, default=False)
 def build(
     hip_hd_output: Path,
     catalog_output: Path,
     proper_names_output: Path,
     output: Path,
+    crossmatch: Path | None,
+    overrides_data_dir: Path | None,
     force: bool,
 ) -> None:
     outputs = download.ensure_identifier_catalogs(
@@ -114,11 +153,16 @@ def build(
         iv27a_proper_names_output=proper_names_output,
         force=force,
     )
+    cm = crossmatch
+    if cm is None and GAIA_HIP_MAP_OUTPUT.is_file():
+        cm = GAIA_HIP_MAP_OUTPUT
     out = prepare_identifiers_sidecar(
         outputs["hip_hd"],
         outputs["iv27a_catalog"],
         outputs["iv27a_proper_names"],
         output,
+        crossmatch_parquet=cm,
+        overrides_data_dir=overrides_data_dir,
         overwrite=force,
     )
     click.echo(f"Wrote wide identifier sidecar to {out.resolve()}")

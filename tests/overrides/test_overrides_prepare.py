@@ -26,6 +26,9 @@ def test_build_overrides_dataframe_has_expected_columns_and_sun_row():
     assert row["source"] == "manual"
     assert row["source_id"] == "sun"
     assert row["x_icrs_pc"] == 0.0
+    assert row["ra_deg"] == 0.0
+    assert row["dec_deg"] == 0.0
+    assert row["r_pc"] == 0.0
     expected_qf = DIST_SRC_OVERRIDE | FLAG_DIST_VALID
     assert int(row["quality_flags"]) == expected_qf
     assert row["astrometry_quality"] == 0.0
