@@ -27,6 +27,7 @@ class LazyGroup(click.Group):
         "gaia-to-hip": "foundinspace.pipeline.gaia_to_hip.cli:cli",
         "hip": "foundinspace.pipeline.hipparcos.cli:cli",
         "identifiers": "foundinspace.pipeline.identifiers.cli:cli",
+        "merge": "foundinspace.pipeline.merge.cli:cli",
         "overrides": "foundinspace.pipeline.overrides.cli:cli",
     },
 )

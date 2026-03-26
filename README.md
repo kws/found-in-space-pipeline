@@ -17,12 +17,12 @@ See `OUTPUT_COLS` in `foundinspace.pipeline.constants` for the full list.
 
 ## End-to-end plan (Gaia + Hipparcos + merge)
 
-Per-catalog CLIs produce staging Parquet. A future **merge** step (see `docs/mergers.md`) will:
+Per-catalog CLIs produce staging Parquet. The **merge** step (see `docs/mergers.md`) will:
 
 1. Run **Gaia** and **Hipparcos** pipelines on their respective inputs, and build the **Gaia↔HIP** mapping sidecar (`fis-pipeline gaia-to-hip build` or `download` + `prepare`; Hipparcos also supports `fis-pipeline hip build`).
 2. Run an **overrides pipeline** that normalizes a versioned **manual overrides** table (e.g. missing objects like the Sun, or replacements where Hipparcos binary solutions are poor).
 3. **Merge** using a cross-match table, quality scoring for Gaia-vs-Hip pairs, with **manual overrides taking precedence** over automatic winners.
-4. Emit a **dense** merged table suitable for Stage 00, optionally **partitioned by HEALPix** (or similar) for efficient downstream octree or spatial queries.
+4. Emit a **dense** merged table suitable for Stage 00, partitioned by **HEALPix** for efficient downstream octree or spatial queries.
 5. Emit **sparse sidecars** (identifiers, HD/Bayer designations, merge decisions) keyed by canonical `source_id`, so rare columns are not duplicated on every row.
 
 ## Installation
@@ -51,6 +51,7 @@ Entry point: **`fis-pipeline`** (or `python -m foundinspace.pipeline`).
 | `fis-pipeline identifiers download` | Download identifier source catalogs (`I/239/hip_main`, `IV/27A/catalog`, `IV/27A/table3`) to ECSV files in `data/catalogs/`. |
 | `fis-pipeline identifiers prepare` | Build a wide identifiers sidecar parquet keyed by `hip_source_id` (default: `data/processed/identifiers_map.parquet`). |
 | `fis-pipeline identifiers build` | Run `identifiers download` then `identifiers prepare` in one command. |
+| `fis-pipeline merge prepare` | Stream-merge Gaia + Hipparcos + crossmatch + overrides into HEALPix-partitioned Parquet under `data/processed/merged/healpix/{pixel}/`, and write `merge_report.json` plus `merge_decisions.parquet`. |
 | `fis-pipeline overrides prepare` | Build merger-ready overrides Parquet from packaged YAML (`OUTPUT_COLS` + override metadata; default: `data/processed/overrides.parquet`). |
 
 **Options for `gaia import`:**

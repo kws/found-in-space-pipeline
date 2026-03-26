@@ -68,7 +68,7 @@ def test_main_writes_parquet_with_limit(tmp_path: Path):
     assert out["source_id"].iloc[0] == 1
 
 
-def test_cli_import_writes_output(tmp_path: Path):
+def test_cli_prepare_writes_output(tmp_path: Path):
     input_file = tmp_path / "hip.ecsv"
     output_file = tmp_path / "out" / "hip_stars.parquet"
     _write_ecsv(_sample_hip_df(), input_file)
@@ -76,7 +76,15 @@ def test_cli_import_writes_output(tmp_path: Path):
     runner = CliRunner()
     result = runner.invoke(
         cli,
-        ["import", str(input_file), "--output", str(output_file), "--limit", "1"],
+        [
+            "prepare",
+            "--input",
+            str(input_file),
+            "--output",
+            str(output_file),
+            "--limit",
+            "1",
+        ],
     )
 
     assert result.exit_code == 0

@@ -13,7 +13,7 @@ This specification covers:
 - when merge occurs relative to per-catalog pipelines and spatial sharding
 - required inputs and outputs (including manual overrides)
 - duplicate-resolution rules and override precedence
-- schema contract for the **dense** merged star table vs **sparse** sidecars
+- schema contract for the **dense** merged star table and **merge decisions** sidecar
 
 This specification does not cover:
 
@@ -36,21 +36,38 @@ Merge runs **after** those three inputs exist and **before** Stage 00:
 
 `gaia parquet set + hip parquet + crossmatch + manual_overrides → merged canonical parquet → Stage 00 → Stage 01`
 
-### Spatial sharding (after merge, before 3D indexing)
+### HEALPix-sharded output (mandatory)
 
-After merge, the combined dataset is written into **2D spatial shards** (recommended: HEALPix at a fixed level, consistent with download partitioning where applicable). Rationale:
+The merged output **must** be partitioned by HEALPix pixel. At ~1.5 billion rows a single monolithic file is not viable — it cannot be written, read, or consumed by downstream stages. HEALPix sharding is not optional.
 
-- Octree or other 3D structures can be built by reading only tiles that intersect a node, instead of scanning the entire catalog.
-- Morton encoding, if used at all, is a concern of that **downstream** indexer, not of the merge/Stage-00 Parquet schema.
-- To improve locality for downstream 3D passes at low cost, sort rows **within each 2D shard** by `r_pc` (distance) as the default policy.
-- If profiling later shows meaningful gains, replace or extend that with a quantized spherical ordering key (sub-tile angular key interleaved with radial key), while keeping deterministic ordering guarantees.
+The output layout is **one directory per HEALPix pixel**, each containing one or more Parquet files:
+
+```
+data/processed/merged/healpix/{pixel}/
+  ├── 0001.parquet
+  ├── 0002.parquet   # if multiple sources contribute to this pixel
+  └── ...
+```
+
+Rationale and constraints:
+
+- **Octree alignment**: HEALPix pixels map cleanly onto 3D octree view cones. Downstream octree builders read a single HEALPix directory to process all stars in that sky region, without scanning the full catalog.
+- **Append-friendly**: A single Gaia input batch may contain rows for more than one HEALPix pixel, and conversely multiple input batches may contribute to the same pixel. Writing into directories (not single files) means the merger can append without assuming one-to-one input-to-output mapping.
+- **Gaia input is already HEALPix-grouped**: Gaia download batches are organized so each HEALPix pixel appears in exactly one input file, but each input file may bundle several pixels. The merger streams through these batches and routes rows to the correct output directory by computing the HEALPix pixel from the winning row's (`ra_deg`, `dec_deg`).
+- **HIP and override rows**: These are small enough to hold in memory. After processing all Gaia batches, unmatched HIP rows and `add` override rows are routed to their respective HEALPix directories based on their own sky positions.
+- **Morton encoding**, if used at all, is a concern of the downstream indexer, not of the merge output schema.
+- HEALPix level for the merged output may differ from the level used for Gaia download batching; the level must be documented in the merge report.
+
+### HEALPix pixel assignment and crossmatch edge cases
+
+The output HEALPix pixel for a merged row is determined by the **winning row's sky position** (`ra_deg`, `dec_deg`). For matched pairs near HEALPix pixel boundaries, the Gaia and Hipparcos positions may fall in different pixels due to slightly different astrometric solutions. This does not affect de-duplication or override resolution — those operate on IDs from the crossmatch table, not on positions. The winning row is placed in whichever pixel its coordinates fall in; the losing row is simply suppressed.
 
 ### Rationale summary
 
 - Merge requires cross-catalog joins that Stage 00 file-local transforms do not perform.
 - Quality metrics for Gaia vs Hip winner selection are available from catalog preprocessing.
 - Merging before Stage 00 avoids duplicating heavy work on rows that will be dropped or replaced.
-- **Sparse identifiers** (HD, Bayer, multiple catalog IDs on one object) are kept in **sidecars** so the main table does not carry mostly-null columns across billions of rows.
+- Sparse identifiers (HD, Bayer, proper names) are kept in the **identifiers sidecar** (produced separately) so the dense table does not carry mostly-null columns across billions of rows.
 
 ---
 
@@ -65,7 +82,6 @@ Required:
 
 Optional:
 
-- Additional identifier tables (HD, Bayer, Flamsteed, etc.) joined **into sidecars**, not necessarily into every row of the dense merge output
 - A provisional Gaia-import mapping sidecar (`gaia_source_id` ↔ `hip_source_id`, when Gaia input includes `hip`) to reduce re-scan cost. This artifact is advisory and can be superseded by merge-time crossmatch/override resolution.
 
 ---
@@ -221,7 +237,9 @@ Persist provenance for:
 - Each **matched pair** decision: `gaia_source_id`, `hip_source_id`, winner catalog, score components (or aggregate), tie-break reason if applicable.
 - Each **override**: `override_id`, `action`, keys, `override_reason`, `override_policy_version`, and link to canonical `source_id` after merge.
 
-Recommend a dedicated **merge decisions** sidecar (Parquet or JSONL) rather than widening the main table.
+This sidecar is bounded by the crossmatch table (~100K rows) plus overrides (~tens of rows). **Unmatched rows are not recorded per-row** — they are counted in the aggregate merge report only. At ~1.5 billion stars, any per-row accumulation outside the matched-pair and override sets would exhaust memory.
+
+Recommend a dedicated **merge decisions** sidecar (Parquet) rather than widening the main table.
 
 ---
 
@@ -247,8 +265,8 @@ This means Hipparcos wins for bright nearby stars where its parallax measurement
 
 The merger must expose:
 
-- versioned quality policy identifier (v1 for this policy)
-- deterministic numeric score per candidate
+- `merge_policy_version` in the merge report JSON (currently `"v1"`)
+- deterministic numeric score per candidate in the decisions sidecar
 - reproducible output for the same input tables
 
 ---
@@ -270,59 +288,78 @@ Should include identity fields:
 - `hip_source_id` (nullable)
 - `catalog_source` (`gaia`, `hip`, or `manual`)
 
-Should also include lightweight spatial helpers needed for 2D sharding and cheap within-shard ordering:
+Should also include lightweight spatial helpers needed for 2D sharding:
 
 - `ra_deg`
 - `dec_deg`
 - `r_pc`
 
-**Do not** require HD, Bayer, or other rare designations on every row of the dense table. Those belong in **sparse sidecars** (below).
+**Do not** require HD, Bayer, or other rare designations on every row of the dense table. Those belong in the **identifiers sidecar** produced by the identifiers pipeline (`fis-pipeline identifiers prepare`), joinable via `hip_source_id`.
 
 Extra columns needed for Stage 00 must survive unchanged where Stage 00 uses `SELECT *` on shards.
 
-### Shard ordering contract (recommended)
+### Within-shard ordering contract
 
-When writing merged HEALPix (or equivalent 2D) shards:
+Within-shard ordering (e.g. `r_pc` ascending for radial octree traversal) is **deferred to a downstream step**. At low HEALPix orders the densest shards can contain tens of millions of rows, making a full-shard sort incompatible with the streaming merge architecture. The merger emits rows in arrival order within each shard file; downstream consumers are responsible for any ordering they require.
 
-- Primary recommendation: stable sort by `r_pc` ascending within each shard (cheap and effective).
-- Optional: compute `spherical_order_key` for closer-to-octree traversal order if benchmarks justify the added complexity.
-- If no explicit key is persisted, ordering must still be deterministic for reproducibility.
+### Sidecars
 
-### Sparse sidecars (small row counts vs full catalog)
-
-Keep optional metadata out of the billion-row table:
-
-- **Identifiers / aliases**: `canonical_source_id`, optional `gaia_source_id`, `hip_source_id`, `override_id`, plus any extra catalog ids.
-- **Designations (current policy)**: for small curated designation sets, prefer a **wide sidecar** keyed by star ID (for example `hip_source_id`, `hd`, `bayer`, `fl`, `cst`, `proper_name`) instead of a `kind/value` long table.
-- **Merge decisions**: as in M5, keyed by pair or by `canonical_source_id`.
-
-Downstream UIs or APIs join sidecars when needed.
+The merger produces the **merge decisions** sidecar (M5), keyed by matched pair or override. Designation and identifier metadata is handled by the **identifiers pipeline** (`data/processed/identifiers_map.parquet`), which is a wide table keyed by `hip_source_id` with columns `hd`, `bayer`, `fl`, `cst`, `proper_name`. Downstream consumers join it via `hip_source_id` on the dense merged table.
 
 ---
 
 ## Validation requirements
 
-Before publishing merged parquet:
+At ~1.5 billion rows, post-hoc full-catalog scans are not practical. Validations must either be checked incrementally during the streaming pass, verified by counter arithmetic on small state, or guaranteed by algorithm construction.
 
-1. Assert no duplicate canonical `source_id` in the dense output.
-2. Assert all matched pairs produce exactly one winner **or** are fully explained by an override (`replace` / `drop`) in the decision record.
-3. Assert row count consistency with documented semantics, e.g.  
-   `unmatched_gaia + unmatched_hip + matched_winners + override_adds − override_drops`  
-   (exact formula must match whether drops remove rows from counts).
-4. Assert required geometry/magnitude columns are non-null where mandatory.
-5. Emit merge summary counts by category, winner catalog, and override action type.
-6. Assert each `drop` override resolves to exactly one existing row by (`source`, `source_id`) and carries no non-audit payload fields.
+### Runtime validations (implemented or required)
+
+1. **Row count consistency** — assert at the end of the merge that `rows_emitted_total == unmatched_gaia + unmatched_hip + matched_pairs_scored + override_replace_applied + override_add_applied`. All counters are maintained during the streaming pass; this is a self-consistency check, not a comparison against an external reference count.
+2. **Drop override payload validation** — at override load time (~tens of rows), assert that each `drop` override carries no non-audit payload fields (geometry/photometry columns must be null). Cheap because it operates on the override table, not on the catalog.
+3. **Emit merge summary counts** by category, winner catalog, and override action type (the merge report).
+4. **Warn on no-effect overrides** — if any `replace` or `drop` override targets a row where neither the target nor its crossmatch partner exists in the loaded data, emit a warning and record the override in the decisions sidecar as `override_no_effect`.
+
+### By construction (no runtime check needed)
+
+5. **No duplicate canonical `source_id`** — guaranteed by the algorithm: Gaia source_ids are unique within Gaia (catalog guarantee), HIP source_ids are unique within HIP, matched pairs emit exactly one winner, and `manual` namespace IDs are string-valued and cannot collide with numeric catalog IDs.
+6. **All matched pairs resolved** — the streaming pass processes every Gaia row encountered in the batch files, and the HIP flush processes every remaining HIP row. Under magnitude-limited Gaia imports, many crossmatch entries will reference absent Gaia rows; these are not matched pairs (see "Magnitude-limited Gaia subsets") and require no resolution.
+7. **Non-null geometry/magnitude** — upstream pipeline responsibility. The Gaia and Hipparcos pipelines validate their own output; the merger does not re-check per-row data quality on 1.5B rows.
+
+---
+
+## Streaming merge architecture
+
+The merger must process ~1.5 billion Gaia rows without materialising the full catalog in memory.
+
+**In-memory lookup tables** (small, loaded once):
+
+- HIP stars (~118K rows)
+- Crossmatch table (`gaia_hip_map.parquet`)
+- Overrides (~tens of rows)
+
+**Streaming pass** (one Gaia batch file at a time):
+
+1. Load lookup sets: which HIP `source_id`s are in the crossmatch, which are override targets, and which Gaia `source_id`s are in the crossmatch or targeted by overrides.
+2. For each Gaia batch file:
+   - Read the batch into memory (each batch is a manageable size).
+   - For each Gaia row: check if it is part of a matched pair (crossmatch lookup) or targeted by an override.
+     - **Matched pair, no override**: compare `astrometry_quality` with the HIP partner. Emit the winner. Mark the HIP row as resolved.
+     - **Override target**: apply the override. Mark the pair (if any) as resolved.
+     - **Unmatched Gaia**: emit as-is.
+   - Compute HEALPix pixel from the winning row's (`ra_deg`, `dec_deg`) and write to the appropriate output directory.
+3. After all Gaia batches: flush remaining unresolved HIP rows (unmatched) and `add` override rows into their respective HEALPix directories.
+
+**Tracking state across batches:** The merger maintains a set of resolved HIP `source_id`s (and resolved override IDs) across the streaming pass. Since the Gaia download guarantees each HEALPix pixel appears in only one input file, a given Gaia `source_id` should appear in at most one batch. The crossmatch and override lookups are dict/set operations against the in-memory tables.
 
 ---
 
 ## Operational outputs
 
-Merger run should produce:
+Merger run must produce:
 
-- Canonical merged dense Parquet (input to Stage 00), optionally **pre-partitioned by HEALPix** (or equivalent 2D key) for downstream octree/index builds
-- Merge report JSON with counts and policy versions (merge policy + override policy)
-- Decision / override audit tables (Parquet recommended)
-- Sparse sidecar Parquet files for identifiers and designations
+- **HEALPix-partitioned merged Parquet** — one directory per HEALPix pixel under `data/processed/merged/healpix/{pixel}/`, each containing one or more Parquet files. This is the input to downstream octree/index builds.
+- **Merge report JSON** — **aggregate counts only**, not per-row data. Must include: counts by category (unmatched Gaia, unmatched HIP, matched-pair winners by catalog, override actions by type), `merge_policy_version` (e.g. `"v1"`), HEALPix order and nside, and full input file manifest (Gaia directory, HIP path, crossmatch path, overrides path). This must remain a small fixed-size document regardless of catalog size. Do not accumulate per-row state for the ~1.5B unmatched Gaia rows.
+- **Decision / override audit sidecar** (Parquet) — per M5, recording every **matched-pair decision** and **override action** including suppressed partners. This sidecar is bounded by the crossmatch table size (~100K rows) plus the override count (~tens of rows), not by the full catalog size. Unmatched rows (which make up the vast majority of the 1.5B Gaia catalog) are **not** recorded individually — they are accounted for only in the aggregate report counts.
 
 ---
 
@@ -341,6 +378,6 @@ The following were resolved before the first merger implementation:
 ## Non-normative notes
 
 - A "merge plan now, apply later" strategy adds pipeline complexity with little benefit; current recommendation is direct merge after catalog preprocessing and before Stage 00.
-- Full reverse lookup indices remain serving-layer artifacts; the **sidecars** above are the pipeline’s contract for sparse metadata.
+- Full reverse lookup indices remain serving-layer artifacts.
 - HEALPix level for **serving shards** may differ from HEALPix used only for **Gaia download batching**; document the level used for merged output.
 - Gaia-import sidecars can provide convenient `gaia_source_id` ↔ `hip_source_id` hints, but merge outputs remain the canonical source of truth for identity/provenance after overrides and winner selection.
