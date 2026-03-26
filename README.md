@@ -25,6 +25,11 @@ Per-catalog CLIs produce staging Parquet. The **merge** step (see `docs/mergers.
 4. Emit a **dense** merged table suitable for Stage 00, partitioned by **HEALPix** for efficient downstream octree or spatial queries.
 5. Emit **sparse sidecars** (identifiers, HD/Bayer designations, merge decisions) keyed by canonical `source_id`, so rare columns are not duplicated on every row.
 
+### Documentation ownership boundary
+
+- This repository owns merger policy and merged artifact semantics (`docs/mergers.md`).
+- The octree repository owns Stage 00/01/02 build contracts and `.octree` reader/writer format details.
+
 ## Installation
 
 Requires Python ≥3.13. From the project root:
