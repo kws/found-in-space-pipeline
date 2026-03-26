@@ -13,12 +13,24 @@ def test_iter_override_source_files_includes_sun_yaml():
     names = [p.name for p in files]
     assert "sun.yaml" in names
     assert "alpha_cen.yaml" in names
+    assert "high-proper-motion.yaml" in names
 
 
 def test_load_override_source_texts_reads_packaged_yaml():
     sources = load_override_source_texts()
     assert "sun.yaml" in sources
     assert "manual.sun.add.v1" in sources["sun.yaml"]
+
+
+def test_load_normalized_override_stars_fills_cartesian_for_high_proper_motion():
+    stars = load_normalized_override_stars()
+    b = next(s for s in stars if s["override_id"] == "manual.barnards_star.replace.v1")
+    ex, ey, ez = icrs_spherical_to_cartesian_pc(
+        float(b["ra_deg"]),
+        float(b["dec_deg"]),
+        float(b["r_pc"]),
+    )
+    assert np.allclose([b["x_icrs_pc"], b["y_icrs_pc"], b["z_icrs_pc"]], [ex, ey, ez])
 
 
 def test_load_normalized_override_stars_fills_cartesian_for_alpha_cen():

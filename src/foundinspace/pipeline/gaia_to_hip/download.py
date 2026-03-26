@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import click
+from astropy.table import Table
 from astroquery.gaia import Gaia
 
 from foundinspace.pipeline.paths import GAIA_HIP_BEST_NEIGHBOUR_ECSV
@@ -33,7 +34,8 @@ def fetch_hipparcos2_best_neighbour_to_ecsv(
     if output_path.exists() and not overwrite:
         raise FileExistsError(str(output_path))
 
-    job = Gaia.launch_job(BEST_NEIGHBOUR_QUERY)
+    # Use async TAP job to avoid astroquery sync-query TOP truncation.
+    job = Gaia.launch_job_async(BEST_NEIGHBOUR_QUERY)
     result = job.get_results()
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -79,7 +81,11 @@ def ensure_hipparcos2_best_neighbour_ecsv(
 )
 def main(output: Path, force: bool) -> None:
     path = ensure_hipparcos2_best_neighbour_ecsv(output, force=force)
-    click.echo(f"hipparcos2_best_neighbour catalog ready at {path.resolve()}")
+    row_count = len(Table.read(path, format="ascii.ecsv"))
+    click.echo(
+        "hipparcos2_best_neighbour catalog ready at "
+        f"{path.resolve()} ({row_count:,} rows)"
+    )
 
 
 if __name__ == "__main__":
