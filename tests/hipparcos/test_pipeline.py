@@ -2,7 +2,9 @@
 
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
+import pytest
 from astropy.table import Table
 from click.testing import CliRunner
 
@@ -40,6 +42,27 @@ def _sample_hip_df() -> pd.DataFrame:
     )
 
 
+def _sample_hip_df_with_invalid_parallax() -> pd.DataFrame:
+    """Two valid stars plus one with Plx <= 0 (must be dropped from pipeline output)."""
+    base = _sample_hip_df()
+    bad = pd.DataFrame(
+        [
+            {
+                "HIP": 99,
+                "RArad": 0.0,
+                "DErad": 0.0,
+                "Plx": 0.0,
+                "e_Plx": 0.5,
+                "pmRA": 0.0,
+                "pmDE": 0.0,
+                "Hpmag": 8.0,
+                "B-V": 0.5,
+            },
+        ]
+    )
+    return pd.concat([base, bad], ignore_index=True)
+
+
 def _write_ecsv(df: pd.DataFrame, path: Path) -> None:
     table = Table.from_pandas(df, index=False)
     table.write(path, format="ascii.ecsv", overwrite=True)
@@ -51,6 +74,30 @@ def test_run_pipeline_outputs_canonical_schema_and_source_fields():
     assert (out["source"] == "hip").all()
     assert out["source_id"].dtype == "uint64"
     assert out["source_id"].tolist() == [1, 2]
+
+
+def test_run_pipeline_drops_invalid_parallax_rows():
+    out = _run_hipparcos_pipeline(_sample_hip_df_with_invalid_parallax())
+    assert len(out) == 2
+    assert out["source_id"].tolist() == [1, 2]
+    assert np.isfinite(out["mag_abs"].to_numpy()).all()
+    r_pc = np.sqrt(
+        out["x_icrs_pc"].astype(float) ** 2
+        + out["y_icrs_pc"].astype(float) ** 2
+        + out["z_icrs_pc"].astype(float) ** 2
+    )
+    assert np.isfinite(r_pc).all()
+
+
+def test_run_pipeline_mag_abs_matches_distance_modulus():
+    out = _run_hipparcos_pipeline(_sample_hip_df())
+    # HIP 1: Plx=10 mas -> 100 pc; Hpmag=7; DM = 5*log10(10)=5 -> M = 2
+    row0 = out.loc[out["source_id"] == 1].iloc[0]
+    assert row0["mag_abs"] == pytest.approx(2.0, rel=0, abs=1e-9)
+    # HIP 2: Plx=5 -> 200 pc; DM = 5*log10(20)
+    row1 = out.loc[out["source_id"] == 2].iloc[0]
+    dm = 5.0 * np.log10(200.0 / 10.0)
+    assert row1["mag_abs"] == pytest.approx(9.0 - dm, rel=0, abs=1e-9)
 
 
 def test_main_writes_parquet_with_limit(tmp_path: Path):

@@ -33,14 +33,30 @@ def assign_photometry_hip(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def compute_mag_abs_hip(df: pd.DataFrame) -> pd.DataFrame:
-    """HIP-only: distance modulus only. photometry_quality = 2.17 * (e_Plx/Plx)."""
-    r_pc = df["distance_use_pc"].astype(float)
-    mag = df["mag"].astype(float)
-    dm = np.where(r_pc > 0, 5 * np.log10(r_pc / 10), np.nan)
-    df["mag_abs"] = mag - dm
-    f_hip = df["e_Plx"].astype(float) / np.maximum(df["Plx"].astype(float), 1e-12)
-    df["photometry_quality"] = PHOTOMETRY_QUALITY_DM_FACTOR * np.where(
-        np.isfinite(f_hip), f_hip, np.nan
+    """HIP-only: distance modulus only when distance_use_pc is finite and positive.
+
+    photometry_quality = 2.17 * (e_Plx/Plx) only for valid positive parallax;
+    otherwise NaN (no max(Plx, eps) blow-up).
+    """
+    r_pc = df["distance_use_pc"].astype(float).to_numpy()
+    mag = df["mag"].astype(float).to_numpy()
+    plx_arr = df["Plx"].astype(float).to_numpy()
+    e_plx = df["e_Plx"].astype(float).to_numpy()
+    valid_plx = (
+        np.isfinite(plx_arr)
+        & (plx_arr > 0)
+        & np.isfinite(e_plx)
+        & (e_plx > 0)
+    )
+    f_hip = np.full(plx_arr.shape, np.nan, dtype=float)
+    np.divide(e_plx, plx_arr, out=f_hip, where=valid_plx)
+
+    dm = np.where(np.isfinite(r_pc) & (r_pc > 0), 5.0 * np.log10(r_pc / 10.0), np.nan)
+    df["mag_abs"] = np.where(np.isfinite(dm), mag - dm, np.nan)
+    df["photometry_quality"] = np.where(
+        np.isfinite(f_hip),
+        PHOTOMETRY_QUALITY_DM_FACTOR * f_hip,
+        np.nan,
     )
     return df
 

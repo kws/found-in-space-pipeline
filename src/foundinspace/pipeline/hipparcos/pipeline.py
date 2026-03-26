@@ -1,7 +1,9 @@
 """Hipparcos-only pipeline: ECSV -> parquet (single pass)."""
 
+import logging
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -15,6 +17,8 @@ from foundinspace.pipeline.hipparcos.photometry import (
     compute_mag_abs_hip,
     compute_teff_hip,
 )
+
+_LOG = logging.getLogger(__name__)
 
 _COLUMN_RENAMES = {
     "HIP": "source_id",
@@ -51,6 +55,7 @@ def _normalize_hipparcos_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 def _run_hipparcos_pipeline(df: pd.DataFrame) -> pd.DataFrame:
     work = _normalize_hipparcos_columns(df).copy()
+    n_in = len(work)
     work = select_astrometry_hip(work)
     work = assign_photometry_hip(work)
     work = calculate_coordinates_fast(work)
@@ -58,6 +63,19 @@ def _run_hipparcos_pipeline(df: pd.DataFrame) -> pd.DataFrame:
     work = compute_teff_hip(work)
     work["source"] = "hip"
     work["source_id"] = work["source_id"].astype("uint64")
+    ok = np.isfinite(work["distance_use_pc"].to_numpy(dtype=float, copy=False))
+    n_drop = int((~ok).sum())
+    if n_drop:
+        _LOG.info(
+            "Hipparcos: dropped %s / %s rows without finite distance_use_pc (invalid parallax)",
+            n_drop,
+            n_in,
+        )
+        print(
+            f"Hipparcos: dropped {n_drop:,} / {n_in:,} rows without finite distance_use_pc",
+            flush=True,
+        )
+        work = work.loc[ok].reset_index(drop=True)
     return work[OUTPUT_COLS]
 
 
@@ -68,7 +86,11 @@ def main(
     skip_if_exists: bool = True,
     limit: int | None = None,
 ) -> None:
-    """Run Hipparcos pipeline for one ECSV input and write parquet output."""
+    """Run Hipparcos pipeline for one ECSV input and write parquet output.
+
+    ``limit``, if set, is applied after invalid-parallax rows are removed: at most
+    ``limit`` rows with finite ``distance_use_pc`` are written.
+    """
     if skip_if_exists and output_path.exists():
         print(f"Skipping {input_path} (output exists: {output_path})")
         return

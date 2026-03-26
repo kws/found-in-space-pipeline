@@ -3,7 +3,6 @@ import pandas as pd
 
 from foundinspace.pipeline.constants import (
     DIST_SRC_HIP,
-    EPS,
     FLAG_DIST_PLAUSIBLE,
     FLAG_DIST_VALID,
     FLAG_NEEDS_REVIEW,
@@ -17,21 +16,28 @@ def select_astrometry_hip(df: pd.DataFrame) -> pd.DataFrame:
 
     Sets best_source, astrometry_quality (f_hip), quality_flags, and all *_use_*
     columns for downstream coords. No Gaia/BJ columns needed.
+
+    Invalid or non-positive parallax yields NaN distance (no fabricated 1/plx floor).
     """
-    plx = np.maximum(df["Plx"].astype(float), EPS)
-    f_hip = df["e_Plx"].astype(float) / plx
+    plx_arr = df["Plx"].astype(float).to_numpy()
+    e_plx = df["e_Plx"].astype(float).to_numpy()
     valid = (
-        np.isfinite(f_hip)
-        & (df["Plx"].astype(float) > 0)
-        & (df["e_Plx"].astype(float) > 0)
+        np.isfinite(plx_arr)
+        & np.isfinite(e_plx)
+        & (plx_arr > 0)
+        & (e_plx > 0)
     )
+    f_hip = np.full(plx_arr.shape, np.nan, dtype=float)
+    np.divide(e_plx, plx_arr, out=f_hip, where=valid)
+
     df["best_source"] = "HIP"
-    df["best_score"] = np.where(valid, f_hip, np.nan)
-    df["astrometry_quality"] = df["best_score"]
-    df["r_med_best"] = 1000.0 / plx
-    df["distance_use_pc"] = df["r_med_best"]
-    dist = df["r_med_best"].to_numpy(float)
-    plaus = np.isfinite(dist) & (dist > 0.1) & (dist < 200_000)
+    df["best_score"] = f_hip
+    df["astrometry_quality"] = f_hip
+    dist_pc = np.full(plx_arr.shape, np.nan, dtype=float)
+    np.divide(1000.0, plx_arr, out=dist_pc, where=valid)
+    df["r_med_best"] = dist_pc
+    df["distance_use_pc"] = dist_pc
+    plaus = np.isfinite(dist_pc) & (dist_pc > 0.1) & (dist_pc < 200_000)
     flags = (
         np.uint16(DIST_SRC_HIP)
         | np.where(valid, FLAG_DIST_VALID, 0).astype(np.uint16)
