@@ -10,6 +10,7 @@ from foundinspace.pipeline.identifiers.cli import cli
 from foundinspace.pipeline.identifiers.pipeline import (
     IDENTIFIER_OUTPUT_COLS,
     _bayer_code_to_display,
+    _clean_proper_name,
     prepare_identifiers_sidecar,
 )
 
@@ -30,10 +31,45 @@ def _write_crossmatch(path: Path, rows: list[tuple[int, int]]) -> None:
 
 
 def test_bayer_code_display_normalizes_greek_and_suffixes():
+    # Standard 3-letter abbreviations
     assert _bayer_code_to_display("alp", "Cas") == "alpha Cas"
     assert _bayer_code_to_display("kap01", "Dra") == "kappa1 Dra"
     assert _bayer_code_to_display("A.", "Ori") == "A Ori"
     assert _bayer_code_to_display("", "Ori") is None
+
+    # IV/27A catalog uses "alf" for alpha and "ksi" for xi
+    assert _bayer_code_to_display("alf", "Cen") == "alpha Cen"
+    assert _bayer_code_to_display("ksi", "Cet") == "xi Cet"
+
+    # Dotted numeric suffixes: "mu.01" → "mu1", "pi.06" → "pi6"
+    assert _bayer_code_to_display("mu.01", "Boo") == "mu1 Boo"
+    assert _bayer_code_to_display("nu.02", "CMa") == "nu2 CMa"
+    assert _bayer_code_to_display("pi.06", "Ori") == "pi6 Ori"
+
+    # Trailing-dot singles are unchanged: "mu." → "mu Cen"
+    assert _bayer_code_to_display("mu.", "Cen") == "mu Cen"
+
+
+def test_clean_proper_name_strips_semicolons_and_cross_refs():
+    s = pd.Series(
+        [
+            "Prima Giedi; Algiedi Prima; Algedi(with HD192947)",
+            "Ruchba(see HD195774)",
+            "Deneb Dulfim; Deneb el Delphinus",
+            "Misam(also HD19476,158899)",
+            "Vega",
+            None,
+            "",
+        ]
+    )
+    result = _clean_proper_name(s)
+    assert result.iloc[0] == "Prima Giedi"
+    assert result.iloc[1] == "Ruchba"
+    assert result.iloc[2] == "Deneb Dulfim"
+    assert result.iloc[3] == "Misam"
+    assert result.iloc[4] == "Vega"
+    assert pd.isna(result.iloc[5])
+    assert pd.isna(result.iloc[6])
 
 
 def test_prepare_identifiers_sidecar_writes_compound_key_and_gaia_ids(tmp_path: Path):

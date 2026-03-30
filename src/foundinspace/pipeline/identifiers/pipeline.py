@@ -29,6 +29,7 @@ IDENTIFIER_OUTPUT_COLS = [
 _VIZIER_WORK_COLS = ["hip_source_id", "hd", "bayer", "fl", "cst", "proper_name"]
 
 _BAYER_GREEK_MAP = {
+    "alf": "alpha",
     "alp": "alpha",
     "bet": "beta",
     "gam": "gamma",
@@ -39,6 +40,7 @@ _BAYER_GREEK_MAP = {
     "the": "theta",
     "iot": "iota",
     "kap": "kappa",
+    "ksi": "xi",
     "lam": "lambda",
     "mu": "mu",
     "nu": "nu",
@@ -80,12 +82,27 @@ def _clean_text(series: pd.Series) -> pd.Series:
     return out
 
 
+def _clean_proper_name(series: pd.Series) -> pd.Series:
+    """Take the first name from semicolon-separated lists and strip parenthetical cross-refs."""
+    out = series.astype("string").str.strip()
+    out = out.str.split(";").str[0]
+    out = out.str.replace(r"\s*\(.*$", "", regex=True)
+    out = out.str.strip()
+    out = out.mask(out == "", pd.NA)
+    return out
+
+
 def _bayer_code_to_display(bayer_code: str | None, constellation: str | None) -> str | None:
     if bayer_code is None or pd.isna(bayer_code):
         return None
     base = str(bayer_code).strip().rstrip(".")
     if not base:
         return None
+
+    # Normalise dotted numeric suffixes: "mu.01" → "mu01", "pi.06" → "pi06"
+    dotted = re.match(r"^([A-Za-z]+)\.(\d+)$", base)
+    if dotted is not None:
+        base = dotted.group(1) + dotted.group(2)
 
     match = re.match(r"^([A-Za-z]+)(\d*)$", base)
     if match is None:
@@ -143,7 +160,7 @@ def _prepare_vizier_identifier_rows(
     names = iv27a_proper_names_df.copy()
     names.columns = [str(c).strip() for c in names.columns]
     names["hd"] = _coerce_positive_int(names.get("HD", pd.Series(pd.NA)))
-    names["proper_name"] = _clean_text(names.get("Name", pd.Series(pd.NA)))
+    names["proper_name"] = _clean_proper_name(names.get("Name", pd.Series(pd.NA)))
     hd_to_proper = (
         names.loc[names["hd"].notna() & names["proper_name"].notna(), ["hd", "proper_name"]]
         .drop_duplicates(subset=["hd"], keep="first")
