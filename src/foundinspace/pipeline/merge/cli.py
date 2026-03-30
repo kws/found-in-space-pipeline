@@ -3,13 +3,7 @@ from pathlib import Path
 import click
 
 from foundinspace.pipeline.merge.pipeline import run_merge
-from foundinspace.pipeline.paths import (
-    GAIA_HIP_MAP_OUTPUT,
-    HIP_STARS_OUTPUT,
-    MERGED_OUTPUT_DIR,
-    OVERRIDES_OUTPUT,
-    PROCESSED_GAIA_DIR,
-)
+from foundinspace.pipeline.project import load_project
 
 
 @click.group(name="merge")
@@ -17,68 +11,36 @@ def cli():
     """Merge Gaia/HIP/overrides into HEALPix-partitioned Parquet output."""
 
 
+def _load_project_or_die(project_path: Path):
+    try:
+        return load_project(project_path)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+
 @cli.command(name="prepare")
 @click.option(
-    "--gaia-dir",
-    type=click.Path(file_okay=False, path_type=Path),
-    default=PROCESSED_GAIA_DIR,
-    show_default=True,
-    help="Directory with prepared Gaia parquet batches.",
-)
-@click.option(
-    "--hip-input",
-    type=click.Path(dir_okay=False, path_type=Path),
-    default=HIP_STARS_OUTPUT,
-    show_default=True,
-    help="Prepared Hipparcos parquet path.",
-)
-@click.option(
-    "--crossmatch-input",
-    type=click.Path(dir_okay=False, path_type=Path),
-    default=GAIA_HIP_MAP_OUTPUT,
-    show_default=True,
-    help="Gaia↔HIP crossmatch parquet path.",
-)
-@click.option(
-    "--overrides-input",
-    type=click.Path(dir_okay=False, path_type=Path),
-    default=OVERRIDES_OUTPUT,
-    show_default=True,
-    help="Prepared overrides parquet path.",
-)
-@click.option(
-    "--output-dir",
-    "-o",
-    type=click.Path(file_okay=False, path_type=Path),
-    default=MERGED_OUTPUT_DIR,
-    show_default=True,
-    help="Merge output directory root.",
-)
-@click.option(
-    "--healpix-order",
-    type=int,
-    default=3,
-    show_default=True,
-    help="HEALPix order (nside = 2**order).",
+    "--project",
+    "project_path",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="Path to pipeline project TOML.",
 )
 @click.option("--force", "-f", is_flag=True, default=False)
 def prepare(
-    gaia_dir: Path,
-    hip_input: Path,
-    crossmatch_input: Path,
-    overrides_input: Path,
-    output_dir: Path,
-    healpix_order: int,
+    project_path: Path,
     force: bool,
 ) -> None:
     """Run the streaming merge and emit HEALPix-partitioned outputs."""
+    project = _load_project_or_die(project_path)
+    output_dir = project.merge.output_dir
     report = run_merge(
-        gaia_dir=gaia_dir,
-        hip_path=hip_input,
-        crossmatch_path=crossmatch_input,
-        overrides_path=overrides_input,
+        gaia_dir=project.gaia.output_dir,
+        hip_path=project.hip.output_parquet,
+        crossmatch_path=project.gaia_to_hip.output_parquet,
+        overrides_path=project.overrides.output_parquet,
         output_dir=output_dir,
-        healpix_order=healpix_order,
+        healpix_order=project.merge.healpix_order,
         force=force,
     )
     click.echo(f"Wrote merged shards under {(output_dir / 'healpix').resolve()}")
@@ -90,4 +52,3 @@ def prepare(
         f"unmatched_gaia={report.unmatched_gaia:,}, "
         f"unmatched_hip={report.unmatched_hip:,}"
     )
-

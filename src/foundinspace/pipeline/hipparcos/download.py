@@ -6,11 +6,10 @@ from pathlib import Path
 
 import click
 from astroquery.vizier import Vizier
-from foundinspace.pipeline.paths import HIPPARCOS2_ECSV
+
+from foundinspace.pipeline.project import load_project
 
 VIZIER_CATALOG = "I/311/hip2"
-DEFAULT_OUTPUT = HIPPARCOS2_ECSV
-LEGACY_DEFAULT_OUTPUT = DEFAULT_OUTPUT.parent / "hip_bright.ecsv"
 
 
 def fetch_hipparcos_to_ecsv(output_path: Path, *, overwrite: bool = False) -> Path:
@@ -33,7 +32,7 @@ def fetch_hipparcos_to_ecsv(output_path: Path, *, overwrite: bool = False) -> Pa
 
 
 def ensure_hipparcos_ecsv(
-    output_path: Path | None = None,
+    output_path: Path,
     *,
     force: bool = False,
 ) -> Path:
@@ -41,17 +40,7 @@ def ensure_hipparcos_ecsv(
 
     Unless ``force`` is true, an existing file is left unchanged.
     """
-    path = Path(output_path) if output_path is not None else DEFAULT_OUTPUT
-    path = path.expanduser()
-
-    # Backward-compatible default: reuse the prior on-disk name if present.
-    if (
-        not force
-        and path == DEFAULT_OUTPUT
-        and not path.exists()
-        and LEGACY_DEFAULT_OUTPUT.exists()
-    ):
-        return LEGACY_DEFAULT_OUTPUT
+    path = Path(output_path).expanduser()
 
     if path.exists() and not force:
         if not path.is_file():
@@ -63,12 +52,11 @@ def ensure_hipparcos_ecsv(
 
 @click.command()
 @click.option(
-    "--output",
-    "-o",
-    type=click.Path(path_type=Path),
-    default=DEFAULT_OUTPUT,
-    show_default=True,
-    help="ECSV output path.",
+    "--project",
+    "project_path",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="Path to pipeline project TOML.",
 )
 @click.option(
     "--force",
@@ -77,8 +65,12 @@ def ensure_hipparcos_ecsv(
     default=False,
     help="Re-download even if the output file already exists.",
 )
-def main(output: Path, force: bool) -> None:
-    path = ensure_hipparcos_ecsv(output, force=force)
+def main(project_path: Path, force: bool) -> None:
+    try:
+        project = load_project(project_path)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+    path = ensure_hipparcos_ecsv(project.hip.download_ecsv, force=force)
     click.echo(f"Hipparcos catalog ready at {path.resolve()}")
 
 

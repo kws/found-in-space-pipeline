@@ -35,7 +35,7 @@ Per-catalog CLIs produce staging Parquet. The **merge** step (see `docs/mergers.
 Requires Python ≥3.13. From the project root:
 
 ```bash
-pip install -e .
+uv sync
 ```
 
 Dependencies include `astropy`, `pandas`, `pyarrow`, and `votpipe` (see `pyproject.toml`).
@@ -46,60 +46,32 @@ Entry point: **`fis-pipeline`** (or `python -m foundinspace.pipeline`).
 
 | Command | Description |
 |--------|--------------|
-| `fis-pipeline gaia import INPUT [INPUT ...]` | Read Gaia VOTable(s) (`.vot`, `.vot.gz`, `.vot.xz`), run the Gaia pipeline per batch, and write `{stem}.parquet` under `data/processed/gaia` by default (or under `--output-dir`). |
-| `fis-pipeline gaia-to-hip download` | Download `gaiadr3.hipparcos2_best_neighbour` from the Gaia archive to ECSV (default: `data/catalogs/gaia_hipparcos2_best_neighbour.ecsv`). |
-| `fis-pipeline gaia-to-hip prepare` | Read that ECSV and write `data/processed/gaia_hip_map.parquet` (Gaia↔HIP sidecar for the merger). |
-| `fis-pipeline gaia-to-hip build` | Run `download` then `prepare` in one step. |
-| `fis-pipeline hip prepare` | Read a Hipparcos ECSV file, run the Hipparcos pipeline, and write a deterministic output file (default input: `data/catalogs/hipparcos2.ecsv`; default output: `data/processed/hip_stars.parquet`). |
-| `fis-pipeline hip download` | Download Hipparcos New Reduction catalog (`I/311/hip2`) to ECSV (default: `data/catalogs/hipparcos2.ecsv`). |
-| `fis-pipeline hip build` | Run `hip download` (download-if-needed) then `hip prepare` in one step. |
-| `fis-pipeline identifiers download` | Download identifier source catalogs (`I/239/hip_main`, `IV/27A/catalog`, `IV/27A/table3`) to ECSV files in `data/catalogs/`. |
-| `fis-pipeline identifiers prepare` | Build a wide identifiers sidecar parquet keyed by `(source, source_id)` (default: `data/processed/identifiers_map.parquet`). |
-| `fis-pipeline identifiers build` | Run `identifiers download` then `identifiers prepare` in one command. |
-| `fis-pipeline merge prepare` | Stream-merge Gaia + Hipparcos + crossmatch + overrides into HEALPix-partitioned Parquet under `data/processed/merged/healpix/{pixel}/`, and write `merge_report.json` plus `merge_decisions.parquet`. |
-| `fis-pipeline overrides prepare` | Build merger-ready overrides Parquet from packaged YAML (`OUTPUT_COLS` + override metadata; default: `data/processed/overrides.parquet`). |
+| `fis-pipeline gaia import --project PROJECT INPUT [INPUT ...]` | Read Gaia VOTable(s) (`.vot`, `.vot.gz`, `.vot.xz`), run the Gaia pipeline per batch, and write `{stem}.parquet` into `[gaia] output_dir`. Optional `[gaia] mag_limit` filters to `phot_g_mean_mag <= mag_limit`. |
+| `fis-pipeline gaia-to-hip download --project PROJECT` | Download `gaiadr3.hipparcos2_best_neighbour` into `[gaia-to-hip] download_ecsv`. |
+| `fis-pipeline gaia-to-hip prepare --project PROJECT` | Read `[gaia-to-hip] download_ecsv` and write `[gaia-to-hip] output_parquet` (Gaia↔HIP sidecar for the merger). |
+| `fis-pipeline gaia-to-hip build --project PROJECT` | Run `download` then `prepare` in one step. |
+| `fis-pipeline hip download --project PROJECT` | Download Hipparcos New Reduction catalog (`I/311/hip2`) to `[hip] download_ecsv`. |
+| `fis-pipeline hip prepare --project PROJECT` | Read Hipparcos ECSV from `[hip] download_ecsv` and write to `[hip] output_parquet`. |
+| `fis-pipeline hip build --project PROJECT` | Run `hip download` (download-if-needed) then `hip prepare` in one step. |
+| `fis-pipeline identifiers download --project PROJECT` | Download identifier source catalogs (`I/239/hip_main`, `IV/27A/catalog`, `IV/27A/table3`) to ECSV targets in `[identifiers]`. |
+| `fis-pipeline identifiers prepare --project PROJECT` | Build a wide identifiers sidecar parquet keyed by `(source, source_id)` at `[identifiers] output_parquet`. |
+| `fis-pipeline identifiers build --project PROJECT` | Run `identifiers download` then `identifiers prepare` in one command. |
+| `fis-pipeline overrides prepare --project PROJECT` | Build merger-ready overrides Parquet from YAML (`OUTPUT_COLS` + override metadata) and write to `[overrides] output_parquet`. |
+| `fis-pipeline merge prepare --project PROJECT` | Stream-merge Gaia + Hipparcos + crossmatch + overrides into HEALPix-partitioned Parquet under `[merge] output_dir/healpix/{pixel}/`, and write `merge_report.json` plus `merge_decisions.parquet`. Reads from `[gaia]`, `[hip]`, `[gaia-to-hip]`, `[overrides]`, and `[merge]` sections. |
 
-**Options for `gaia import`:**
+### Project configuration
 
-- `--output-dir`, `-o` — Directory for Gaia output Parquet files (default: `data/processed/gaia`).
-- `--force`, `-f` — Overwrite existing output files.
-- `--mag-limit` — Keep only rows with Gaia G magnitude (`phot_g_mean_mag`) less than or equal to this value.
+Pipeline commands require `--project path/to/project.toml`. The project file is the single source of truth for catalog/output paths and merge settings. Each CLI group has its own TOML section (`[gaia]`, `[gaia-to-hip]`, `[hip]`, `[identifiers]`, `[overrides]`, `[merge]`). Only the sections needed by the command you run must be present — missing sections fail fast on access. Runtime behavior settings also live in the project file (for example, `[gaia] mag_limit`).
 
-**Options for `gaia-to-hip download` / `prepare` / `build`:** use `--output` / `-o` for the Parquet sidecar on `prepare` and `build`; `--input` / `-i` on `prepare` for a non-default ECSV; `--download-output` on `build` for a non-default ECSV path. `--force` re-downloads or overwrites outputs as appropriate.
+Generate a starter file:
 
-**Options for `hip prepare` / `hip build`:**
+```bash
+uv run fis-pipeline project init project.toml
+```
 
-- `--input`, `-i` (`hip prepare`) — Hipparcos ECSV input path (default: `data/catalogs/hipparcos2.ecsv`).
-- `--download-output` (`hip build`) — ECSV path for the download step (default: `data/catalogs/hipparcos2.ecsv`).
-- `--output`, `-o` — Hipparcos output path (default: `data/processed/hip_stars.parquet`).
-- `--force`, `-f` — Overwrite existing output files.
-- `--limit`, `-l` — Stop after this many output rows (for testing).
-- Input format is currently ECSV only.
+Path values in the project file may be absolute or relative to the project file directory. Project TOML values do not expand environment variables.
 
-**Options for `overrides prepare`:**
-
-- `--data-dir` — Directory of override YAML files (default: packaged `overrides/data`).
-- `--output`, `-o` — Output Parquet path (default: `data/processed/overrides.parquet`).
-- `--force`, `-f` — Overwrite existing output file.
-
-### Default storage layout and `.env` overrides
-
-By default, the pipeline uses:
-
-- `data/catalogs` for downloaded source catalogs (ECSV), including `gaia_hipparcos2_best_neighbour.ecsv` from `gaia-to-hip download` and `hipparcos2.ecsv` from `hip download`.
-- `data/processed` for derived Parquet outputs and sidecars, including:
-  - Gaia stars in `data/processed/gaia/*.parquet`
-  - Gaia↔HIP map at `data/processed/gaia_hip_map.parquet`
-  - Hipparcos stars at `data/processed/hip_stars.parquet`
-  - Identifiers sidecar at `data/processed/identifiers_map.parquet`
-  - Manual overrides table at `data/processed/overrides.parquet` (from `overrides prepare`)
-
-Both roots are configurable via environment variables (for example in a `.env` file):
-
-- `FIS_CATALOGS_DIR` (default: `data/catalogs`)
-- `FIS_PROCESSED_DIR` (default: `data/processed`)
-
-CLI flags still take precedence. Output directories are auto-created as needed.
+Cross-section dependencies are explicit: `merge prepare` reads inputs from `[gaia]`, `[hip]`, `[gaia-to-hip]`, and `[overrides]`. `identifiers prepare` optionally reads `[gaia-to-hip] output_parquet` for Gaia DR3 cross-matching.
 
 **Identifiers sidecar schema (`identifiers prepare`)**
 
@@ -115,7 +87,7 @@ The sidecar is intentionally **wide** and small, keyed by the compound key `(sou
 - `constellation` (`string`, nullable — constellation abbreviation from IV/27A)
 - `proper_name` (`string`, nullable — proper name from IV/27A/table3 or override YAML)
 
-Sources: Hipparcos-keyed entries are derived from Vizier catalogs (`I/239/hip_main`, `IV/27A`). The Gaia DR3 source ID for HIP stars comes from the crossmatch table (`gaia_hip_map.parquet`) when present (CLI: `--crossmatch`, default `data/processed/gaia_hip_map.parquet` if the file exists). Manual override stars with an `identifiers` block in their YAML are merged from the packaged overrides directory or `--overrides-data-dir`.
+Sources: Hipparcos-keyed entries are derived from Vizier catalogs (`I/239/hip_main`, `IV/27A`). The Gaia DR3 source ID for HIP stars comes from the crossmatch table when `[gaia-to-hip] output_parquet` is configured and present. Manual override stars with an `identifiers` block in their YAML are merged from packaged data, or from `[overrides] data_dir` if configured.
 
 **Overrides table schema (`overrides prepare`)**
 

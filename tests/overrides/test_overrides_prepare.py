@@ -2,12 +2,13 @@
 
 from pathlib import Path
 
-import pandas as pd
 import pyarrow.parquet as pq
-from click.testing import CliRunner
 
-from foundinspace.pipeline.constants import DIST_SRC_OVERRIDE, FLAG_DIST_VALID, OUTPUT_COLS
-from foundinspace.pipeline.overrides.cli import cli
+from foundinspace.pipeline.constants import (
+    DIST_SRC_OVERRIDE,
+    FLAG_DIST_VALID,
+    OUTPUT_COLS,
+)
 from foundinspace.pipeline.overrides.pipeline import (
     OUTPUT_OVERRIDES_COLS,
     build_overrides_dataframe,
@@ -47,12 +48,3 @@ def test_prepare_overrides_parquet_roundtrip(tmp_path: Path):
     for col in OUTPUT_COLS:
         assert col in pdf.columns
 
-
-def test_cli_prepare_writes_file(tmp_path: Path):
-    out = tmp_path / "o.parquet"
-    runner = CliRunner()
-    result = runner.invoke(cli, ["prepare", "--output", str(out), "--force"])
-    assert result.exit_code == 0
-    assert out.exists()
-    df = pd.read_parquet(out)
-    assert list(df.columns) == OUTPUT_OVERRIDES_COLS

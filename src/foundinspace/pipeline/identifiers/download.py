@@ -6,16 +6,12 @@ from pathlib import Path
 
 import click
 from astroquery.vizier import Vizier
-from foundinspace.pipeline.paths import CATALOGS_DIR
+
+from foundinspace.pipeline.project import load_project
 
 HIP_HD_CATALOG = "I/239/hip_main"
 IV27A_CATALOG = "IV/27A/catalog"
 IV27A_PROPER_NAMES = "IV/27A/table3"
-
-DEFAULT_OUTPUT_DIR = CATALOGS_DIR
-DEFAULT_HIP_HD_OUTPUT = DEFAULT_OUTPUT_DIR / "hip_hd.ecsv"
-DEFAULT_IV27A_CATALOG_OUTPUT = DEFAULT_OUTPUT_DIR / "iv27a_catalog.ecsv"
-DEFAULT_IV27A_PROPER_NAMES_OUTPUT = DEFAULT_OUTPUT_DIR / "iv27a_proper_names.ecsv"
 
 
 def _fetch_catalog_to_ecsv(
@@ -40,9 +36,9 @@ def _fetch_catalog_to_ecsv(
 
 def ensure_identifier_catalogs(
     *,
-    hip_hd_output: Path = DEFAULT_HIP_HD_OUTPUT,
-    iv27a_catalog_output: Path = DEFAULT_IV27A_CATALOG_OUTPUT,
-    iv27a_proper_names_output: Path = DEFAULT_IV27A_PROPER_NAMES_OUTPUT,
+    hip_hd_output: Path,
+    iv27a_catalog_output: Path,
+    iv27a_proper_names_output: Path,
     force: bool = False,
 ) -> dict[str, Path]:
     outputs = {
@@ -76,25 +72,11 @@ def ensure_identifier_catalogs(
 
 @click.command()
 @click.option(
-    "--hip-hd-output",
-    type=click.Path(path_type=Path),
-    default=DEFAULT_HIP_HD_OUTPUT,
-    show_default=True,
-    help="ECSV output path for HIP→HD mapping (I/239/hip_main).",
-)
-@click.option(
-    "--catalog-output",
-    type=click.Path(path_type=Path),
-    default=DEFAULT_IV27A_CATALOG_OUTPUT,
-    show_default=True,
-    help="ECSV output path for IV/27A/catalog.",
-)
-@click.option(
-    "--proper-names-output",
-    type=click.Path(path_type=Path),
-    default=DEFAULT_IV27A_PROPER_NAMES_OUTPUT,
-    show_default=True,
-    help="ECSV output path for IV/27A/table3 proper names.",
+    "--project",
+    "project_path",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="Path to pipeline project TOML.",
 )
 @click.option(
     "--force",
@@ -104,15 +86,17 @@ def ensure_identifier_catalogs(
     help="Re-download files even when all outputs already exist.",
 )
 def main(
-    hip_hd_output: Path,
-    catalog_output: Path,
-    proper_names_output: Path,
+    project_path: Path,
     force: bool,
 ) -> None:
+    try:
+        project = load_project(project_path)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
     outputs = ensure_identifier_catalogs(
-        hip_hd_output=hip_hd_output,
-        iv27a_catalog_output=catalog_output,
-        iv27a_proper_names_output=proper_names_output,
+        hip_hd_output=project.identifiers.hip_hd_ecsv,
+        iv27a_catalog_output=project.identifiers.iv27a_catalog_ecsv,
+        iv27a_proper_names_output=project.identifiers.iv27a_proper_names_ecsv,
         force=force,
     )
     click.echo(f"HIP→HD catalog ready at {outputs['hip_hd'].resolve()}")

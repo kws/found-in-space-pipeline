@@ -3,15 +3,8 @@ from pathlib import Path
 import click
 
 from foundinspace.pipeline.identifiers import download
-from foundinspace.pipeline.identifiers.download import (
-    DEFAULT_HIP_HD_OUTPUT,
-    DEFAULT_IV27A_CATALOG_OUTPUT,
-    DEFAULT_IV27A_PROPER_NAMES_OUTPUT,
-)
 from foundinspace.pipeline.identifiers.pipeline import prepare_identifiers_sidecar
-from foundinspace.pipeline.paths import GAIA_HIP_MAP_OUTPUT, IDENTIFIERS_MAP_OUTPUT
-
-DEFAULT_SIDECAR_OUTPUT = IDENTIFIERS_MAP_OUTPUT
+from foundinspace.pipeline.project import load_project
 
 
 @click.group(name="identifiers")
@@ -22,71 +15,53 @@ def cli():
 cli.add_command(download.main, name="download")
 
 
+def _load_project_or_die(project_path: Path):
+    try:
+        return load_project(project_path)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+
+def _crossmatch_parquet(project) -> Path | None:
+    """Read crossmatch path from [gaia-to-hip] if the section and file exist."""
+    try:
+        cm = project.gaia_to_hip.output_parquet
+    except ValueError:
+        return None
+    if not cm.is_file():
+        return None
+    return cm
+
+
+def _overrides_data_dir(project) -> Path | None:
+    """Read data_dir from [overrides] if the section and key exist."""
+    try:
+        return project.overrides.data_dir
+    except ValueError:
+        return None
+
+
 @cli.command(name="prepare")
 @click.option(
-    "--hip-hd",
+    "--project",
+    "project_path",
+    required=True,
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    default=DEFAULT_HIP_HD_OUTPUT,
-    show_default=True,
-    help="HIP→HD ECSV input path.",
-)
-@click.option(
-    "--catalog",
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    default=DEFAULT_IV27A_CATALOG_OUTPUT,
-    show_default=True,
-    help="IV/27A catalog ECSV input path.",
-)
-@click.option(
-    "--proper-names",
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    default=DEFAULT_IV27A_PROPER_NAMES_OUTPUT,
-    show_default=True,
-    help="IV/27A proper names ECSV input path.",
-)
-@click.option(
-    "--output",
-    "-o",
-    type=click.Path(dir_okay=False, path_type=Path),
-    default=DEFAULT_SIDECAR_OUTPUT,
-    show_default=True,
-    help="Prepared identifiers sidecar output path (Parquet).",
-)
-@click.option(
-    "--crossmatch",
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    default=None,
-    help=(
-        "Gaia↔HIP crossmatch Parquet (gaia_source_id, hip_source_id). "
-        f"Default: {GAIA_HIP_MAP_OUTPUT} if that file exists, else skip Gaia IDs on HIP rows."
-    ),
-)
-@click.option(
-    "--overrides-data-dir",
-    type=click.Path(file_okay=False, path_type=Path),
-    default=None,
-    help="Override YAML directory (default: packaged overrides/data). Merges `identifiers` blocks.",
+    help="Path to pipeline project TOML.",
 )
 @click.option("--force", "-f", is_flag=True, default=False)
 def prepare(
-    hip_hd: Path,
-    catalog: Path,
-    proper_names: Path,
-    output: Path,
-    crossmatch: Path | None,
-    overrides_data_dir: Path | None,
+    project_path: Path,
     force: bool,
 ) -> None:
-    cm = crossmatch
-    if cm is None and GAIA_HIP_MAP_OUTPUT.is_file():
-        cm = GAIA_HIP_MAP_OUTPUT
+    project = _load_project_or_die(project_path)
     out = prepare_identifiers_sidecar(
-        hip_hd,
-        catalog,
-        proper_names,
-        output,
-        crossmatch_parquet=cm,
-        overrides_data_dir=overrides_data_dir,
+        project.identifiers.hip_hd_ecsv,
+        project.identifiers.iv27a_catalog_ecsv,
+        project.identifiers.iv27a_proper_names_ecsv,
+        project.identifiers.output_parquet,
+        crossmatch_parquet=_crossmatch_parquet(project),
+        overrides_data_dir=_overrides_data_dir(project),
         overwrite=force,
     )
     click.echo(f"Wrote wide identifier sidecar to {out.resolve()}")
@@ -94,75 +69,31 @@ def prepare(
 
 @cli.command(name="build")
 @click.option(
-    "--hip-hd-output",
-    type=click.Path(path_type=Path),
-    default=DEFAULT_HIP_HD_OUTPUT,
-    show_default=True,
-    help="ECSV output path for HIP→HD mapping (I/239/hip_main).",
-)
-@click.option(
-    "--catalog-output",
-    type=click.Path(path_type=Path),
-    default=DEFAULT_IV27A_CATALOG_OUTPUT,
-    show_default=True,
-    help="ECSV output path for IV/27A/catalog.",
-)
-@click.option(
-    "--proper-names-output",
-    type=click.Path(path_type=Path),
-    default=DEFAULT_IV27A_PROPER_NAMES_OUTPUT,
-    show_default=True,
-    help="ECSV output path for IV/27A/table3 proper names.",
-)
-@click.option(
-    "--output",
-    "-o",
-    type=click.Path(dir_okay=False, path_type=Path),
-    default=DEFAULT_SIDECAR_OUTPUT,
-    show_default=True,
-    help="Prepared identifiers sidecar output path (Parquet).",
-)
-@click.option(
-    "--crossmatch",
+    "--project",
+    "project_path",
+    required=True,
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    default=None,
-    help=(
-        "Gaia↔HIP crossmatch Parquet. "
-        f"Default: {GAIA_HIP_MAP_OUTPUT} if present."
-    ),
-)
-@click.option(
-    "--overrides-data-dir",
-    type=click.Path(file_okay=False, path_type=Path),
-    default=None,
-    help="Override YAML directory (default: packaged overrides/data).",
+    help="Path to pipeline project TOML.",
 )
 @click.option("--force", "-f", is_flag=True, default=False)
 def build(
-    hip_hd_output: Path,
-    catalog_output: Path,
-    proper_names_output: Path,
-    output: Path,
-    crossmatch: Path | None,
-    overrides_data_dir: Path | None,
+    project_path: Path,
     force: bool,
 ) -> None:
+    project = _load_project_or_die(project_path)
     outputs = download.ensure_identifier_catalogs(
-        hip_hd_output=hip_hd_output,
-        iv27a_catalog_output=catalog_output,
-        iv27a_proper_names_output=proper_names_output,
+        hip_hd_output=project.identifiers.hip_hd_ecsv,
+        iv27a_catalog_output=project.identifiers.iv27a_catalog_ecsv,
+        iv27a_proper_names_output=project.identifiers.iv27a_proper_names_ecsv,
         force=force,
     )
-    cm = crossmatch
-    if cm is None and GAIA_HIP_MAP_OUTPUT.is_file():
-        cm = GAIA_HIP_MAP_OUTPUT
     out = prepare_identifiers_sidecar(
         outputs["hip_hd"],
         outputs["iv27a_catalog"],
         outputs["iv27a_proper_names"],
-        output,
-        crossmatch_parquet=cm,
-        overrides_data_dir=overrides_data_dir,
+        project.identifiers.output_parquet,
+        crossmatch_parquet=_crossmatch_parquet(project),
+        overrides_data_dir=_overrides_data_dir(project),
         overwrite=force,
     )
     click.echo(f"Wrote wide identifier sidecar to {out.resolve()}")

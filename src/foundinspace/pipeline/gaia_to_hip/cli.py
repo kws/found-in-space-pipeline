@@ -4,10 +4,7 @@ import click
 
 from foundinspace.pipeline.gaia_to_hip import download
 from foundinspace.pipeline.gaia_to_hip.pipeline import prepare_gaia_hip_mapping
-from foundinspace.pipeline.paths import (
-    GAIA_HIP_BEST_NEIGHBOUR_ECSV,
-    GAIA_HIP_MAP_OUTPUT,
-)
+from foundinspace.pipeline.project import load_project
 
 
 @click.group(name="gaia-to-hip")
@@ -18,56 +15,54 @@ def cli():
 cli.add_command(download.main, name="download")
 
 
+def _load_project_or_die(project_path: Path):
+    try:
+        return load_project(project_path)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+
 @cli.command(name="prepare")
 @click.option(
-    "--input",
-    "-i",
-    "input_ecsv",
+    "--project",
+    "project_path",
+    required=True,
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    default=GAIA_HIP_BEST_NEIGHBOUR_ECSV,
-    show_default=True,
-    help="Cross-match ECSV from `gaia-to-hip download`.",
-)
-@click.option(
-    "--output",
-    "-o",
-    type=click.Path(dir_okay=False, path_type=Path),
-    default=GAIA_HIP_MAP_OUTPUT,
-    show_default=True,
-    help="Gaia↔HIP mapping Parquet output path.",
+    help="Path to pipeline project TOML.",
 )
 @click.option("--force", "-f", is_flag=True, default=False)
 def prepare_cmd(
-    input_ecsv: Path,
-    output: Path,
+    project_path: Path,
     force: bool,
 ) -> None:
-    out = prepare_gaia_hip_mapping(input_ecsv, output, overwrite=force)
+    project = _load_project_or_die(project_path)
+    out = prepare_gaia_hip_mapping(
+        project.gaia_to_hip.download_ecsv,
+        project.gaia_to_hip.output_parquet,
+        overwrite=force,
+    )
     click.echo(f"Wrote Gaia↔HIP mapping sidecar to {out.resolve()}")
 
 
 @cli.command(name="build")
 @click.option(
-    "--download-output",
-    type=click.Path(path_type=Path),
-    default=GAIA_HIP_BEST_NEIGHBOUR_ECSV,
-    show_default=True,
-    help="ECSV path for downloaded cross-match table.",
-)
-@click.option(
-    "--output",
-    "-o",
-    type=click.Path(dir_okay=False, path_type=Path),
-    default=GAIA_HIP_MAP_OUTPUT,
-    show_default=True,
-    help="Gaia↔HIP mapping Parquet output path.",
+    "--project",
+    "project_path",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="Path to pipeline project TOML.",
 )
 @click.option("--force", "-f", is_flag=True, default=False)
 def build_cmd(
-    download_output: Path,
-    output: Path,
+    project_path: Path,
     force: bool,
 ) -> None:
+    project = _load_project_or_die(project_path)
+    download_output = project.gaia_to_hip.download_ecsv
     download.ensure_hipparcos2_best_neighbour_ecsv(download_output, force=force)
-    out = prepare_gaia_hip_mapping(download_output, output, overwrite=force)
+    out = prepare_gaia_hip_mapping(
+        download_output,
+        project.gaia_to_hip.output_parquet,
+        overwrite=force,
+    )
     click.echo(f"Wrote Gaia↔HIP mapping sidecar to {out.resolve()}")

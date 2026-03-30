@@ -3,7 +3,7 @@ from pathlib import Path
 import click
 
 from foundinspace.pipeline.gaia.pipeline import main
-from foundinspace.pipeline.paths import PROCESSED_GAIA_DIR
+from foundinspace.pipeline.project import load_project
 
 
 @click.group(name="gaia")
@@ -11,37 +11,38 @@ def cli():
     pass
 
 
+def _load_project_or_die(project_path: Path):
+    try:
+        return load_project(project_path)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+
 @cli.command(name="import")
+@click.option(
+    "--project",
+    "project_path",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="Path to pipeline project TOML.",
+)
 @click.argument(
     "input_files",
     nargs=-1,
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
 )
-@click.option(
-    "--output-dir",
-    "-o",
-    type=click.Path(file_okay=False, path_type=Path),
-    default=PROCESSED_GAIA_DIR,
-    show_default=True,
-)
 @click.option("--force", "-f", is_flag=True, default=False)
-@click.option(
-    "--mag-limit",
-    type=float,
-    default=None,
-    help="Keep only rows with Gaia G magnitude <= this value.",
-)
 def import_gaia(
+    project_path: Path,
     input_files: list[Path],
-    output_dir: Path = PROCESSED_GAIA_DIR,
     force: bool = False,
-    mag_limit: float | None = None,
 ):
     if len(input_files) == 0:
         click.echo("No input files provided")
         return
 
-    output_root = Path(output_dir).expanduser()
+    project = _load_project_or_die(project_path)
+    output_root = project.gaia.output_dir
     output_root.mkdir(parents=True, exist_ok=True)
 
     for input_file in input_files:
@@ -51,7 +52,7 @@ def import_gaia(
             input_file,
             output_file,
             skip_if_exists=not force,
-            mag_limit=mag_limit,
+            mag_limit=project.gaia.mag_limit,
         )
 
 

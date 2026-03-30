@@ -8,7 +8,7 @@ import click
 from astropy.table import Table
 from astroquery.gaia import Gaia
 
-from foundinspace.pipeline.paths import GAIA_HIP_BEST_NEIGHBOUR_ECSV
+from foundinspace.pipeline.project import load_project
 
 BEST_NEIGHBOUR_QUERY = """
 SELECT
@@ -44,7 +44,7 @@ def fetch_hipparcos2_best_neighbour_to_ecsv(
 
 
 def ensure_hipparcos2_best_neighbour_ecsv(
-    output_path: Path | None = None,
+    output_path: Path,
     *,
     force: bool = False,
 ) -> Path:
@@ -52,8 +52,7 @@ def ensure_hipparcos2_best_neighbour_ecsv(
 
     Unless ``force`` is true, an existing file is left unchanged.
     """
-    path = Path(output_path) if output_path is not None else GAIA_HIP_BEST_NEIGHBOUR_ECSV
-    path = path.expanduser()
+    path = Path(output_path).expanduser()
 
     if path.exists() and not force:
         if not path.is_file():
@@ -65,12 +64,11 @@ def ensure_hipparcos2_best_neighbour_ecsv(
 
 @click.command()
 @click.option(
-    "--output",
-    "-o",
-    type=click.Path(path_type=Path),
-    default=GAIA_HIP_BEST_NEIGHBOUR_ECSV,
-    show_default=True,
-    help="ECSV output path for hipparcos2_best_neighbour.",
+    "--project",
+    "project_path",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="Path to pipeline project TOML.",
 )
 @click.option(
     "--force",
@@ -79,8 +77,15 @@ def ensure_hipparcos2_best_neighbour_ecsv(
     default=False,
     help="Re-download even if the output file already exists.",
 )
-def main(output: Path, force: bool) -> None:
-    path = ensure_hipparcos2_best_neighbour_ecsv(output, force=force)
+def main(project_path: Path, force: bool) -> None:
+    try:
+        project = load_project(project_path)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+    path = ensure_hipparcos2_best_neighbour_ecsv(
+        project.gaia_to_hip.download_ecsv,
+        force=force,
+    )
     row_count = len(Table.read(path, format="ascii.ecsv"))
     click.echo(
         "hipparcos2_best_neighbour catalog ready at "

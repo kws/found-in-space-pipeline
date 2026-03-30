@@ -6,10 +6,8 @@ import numpy as np
 import pandas as pd
 import pytest
 from astropy.table import Table
-from click.testing import CliRunner
 
 from foundinspace.pipeline.constants import OUTPUT_COLS
-from foundinspace.pipeline.hipparcos.cli import cli
 from foundinspace.pipeline.hipparcos.pipeline import (
     HIP_AUXILIARY_COLS,
     HIP_OUTPUT_COLS,
@@ -128,27 +126,3 @@ def test_main_writes_parquet_with_limit(tmp_path: Path):
     assert out["source"].iloc[0] == "hip"
     assert out["source_id"].iloc[0] == 1
 
-
-def test_cli_prepare_writes_output(tmp_path: Path):
-    input_file = tmp_path / "hip.ecsv"
-    output_file = tmp_path / "out" / "hip_stars.parquet"
-    _write_ecsv(_sample_hip_df(), input_file)
-
-    runner = CliRunner()
-    result = runner.invoke(
-        cli,
-        [
-            "prepare",
-            "--input",
-            str(input_file),
-            "--output",
-            str(output_file),
-            "--limit",
-            "1",
-        ],
-    )
-
-    assert result.exit_code == 0
-    out = pd.read_parquet(output_file)
-    assert len(out) == 1
-    assert out["source"].iloc[0] == "hip"
