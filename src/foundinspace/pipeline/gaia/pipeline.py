@@ -26,6 +26,9 @@ from foundinspace.pipeline.gaia.photometry import (
 
 BATCH_SIZE = 1_000_000
 
+GAIA_AUXILIARY_COLS = ["ruwe", "phot_g_mean_mag"]
+GAIA_OUTPUT_COLS = OUTPUT_COLS + GAIA_AUXILIARY_COLS
+
 
 def _run_gaia_pipeline_batch(df: pd.DataFrame) -> pd.DataFrame:
     """Run the Gaia pipeline on a single batch; returns DataFrame with _OUTPUT_COLS only."""
@@ -43,7 +46,10 @@ def _run_gaia_pipeline_batch(df: pd.DataFrame) -> pd.DataFrame:
     # work = compute_log_g_gaia(work)
     work["source"] = "gaia"
     work["source_id"] = work["source_id"].astype("uint64")
-    return work[OUTPUT_COLS]
+    for col in GAIA_AUXILIARY_COLS:
+        if col not in work.columns:
+            work[col] = np.nan
+    return work[GAIA_OUTPUT_COLS]
 
 
 def main(

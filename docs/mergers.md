@@ -257,7 +257,7 @@ Recommend a dedicated **merge decisions** sidecar (Parquet) rather than widening
 
 ## Quality scoring contract
 
-### Policy v1: `astrometry_quality` comparison
+### Guarded `astrometry_quality` comparison with vetoes and bright-star gate
 
 Both the Gaia and Hipparcos pipelines produce `astrometry_quality` as a **fractional parallax error** (σ/π): `e_Plx / Plx` for Hipparcos (`hipparcos/astrometry.py`), `parallax_error / max(parallax, ε)` for Gaia DR3 (`gaia/astrometry.py`). For Bailer-Jones distances the analogous half-interval width is used. These values are directly comparable across catalogs: **lower is better**.
 
@@ -268,18 +268,54 @@ Gaia fallback tiers already carry sentinel quality values that sort correctly ag
 - Tier C (photometric distance): `20.0`
 - Tier D (synthetic prior): `50.0`
 
-Winner selection for matched pairs (M2):
+#### Decision tree
 
-1. Compare `astrometry_quality` directly. Lower value wins.
-2. If values are equal, apply the deterministic tie-break (M3): prefer Gaia, then lower `source_id`.
+Winner selection for matched pairs (M2) applies these rules in order:
 
-This means Hipparcos wins for bright nearby stars where its parallax measurement is more precise than Gaia's, and Gaia wins everywhere else — which is the reason both pipelines compute quality metrics.
+1. **Neighbour veto**: If `number_of_neighbours > 1` in the crossmatch table, the match is ambiguous (Gaia resolves what Hipparcos saw as one source into multiple candidates). Gaia wins automatically. Recorded as `tie_break_reason = "neighbour_veto"`.
+
+2. **Hipparcos multiplicity veto**: If the Hipparcos solution type `Sn ≠ 5` (anything other than the standard 5-parameter single-star solution), the Hipparcos astrometry is suspect — it may be a photocentre, an acceleration solution, or a component solution for a multiple system. Gaia wins automatically. Recorded as `tie_break_reason = "hip_multiplicity"`.
+
+3. **Bright-star gate with margin**: Hipparcos can only beat Gaia by a **significant margin** that depends on apparent brightness:
+
+   | Apparent G magnitude | Margin | Meaning |
+   |---|---|---|
+   | G < 3.5 (very bright) | 1.0× | Hip wins if strictly better (Gaia often incomplete/problematic) |
+   | 3.5 ≤ G < 6 (bright) | 0.6× | Hip score must be < 60% of Gaia's score |
+   | G ≥ 6 (normal) | 0.5× | Hip score must be < 50% of Gaia's score |
+
+   Apparent G is taken from `phot_g_mean_mag` when available; otherwise estimated from `mag_abs + 5*log10(r_pc / 10)`. If neither is available, the normal (strictest) margin applies.
+
+4. **Tie-break**: If neither side wins after margin comparison, Gaia wins. Recorded as `tie_break_reason = "gaia_margin"` when Hip was better but did not meet the margin threshold.
+
+#### Auxiliary columns for diagnostics
+
+Both catalog pipelines carry auxiliary columns alongside the core `OUTPUT_COLS`:
+
+- **Gaia**: `ruwe` (Renormalised Unit Weight Error), `phot_g_mean_mag` (apparent G-band magnitude)
+- **Hipparcos**: `Sn` (new-reduction solution type), `Hpmag` (apparent Hipparcos magnitude)
+- **Crossmatch**: `number_of_neighbours`, `angular_distance`
+
+These auxiliary columns are **not** included in the merged dense output — they are inputs to the decision logic and appear in the **merge decisions sidecar** for diagnostic analysis:
+
+| Decision column | Source | Purpose |
+|---|---|---|
+| `number_of_neighbours` | Crossmatch | Match ambiguity (veto if > 1) |
+| `angular_distance_arcsec` | Crossmatch | Match quality diagnostic |
+| `gaia_ruwe` | Gaia processed | RUWE > 1.4 flags suspect single-star astrometry |
+| `gaia_phot_g_mean_mag` | Gaia processed | Apparent magnitude for bright-star gate |
+| `hip_solution_type` | Hip processed | Hipparcos Sn (veto if ≠ 5) |
+| `hip_apparent_mag` | Hip processed | Apparent Hpmag diagnostic |
 
 The merger must expose:
 
-- `merge_policy_version` in the merge report JSON (currently `"v1"`)
 - deterministic numeric score per candidate in the decisions sidecar
+- all diagnostic auxiliary columns per matched pair
 - reproducible output for the same input tables
+
+#### Backward compatibility
+
+The widened catalog outputs are a **superset** of the original `OUTPUT_COLS` schema. The merger validates that required columns are present (subset check), so older processed files without auxiliary columns still work — the merger defaults missing auxiliary columns to safe values (NaN / None) that bypass vetoes and apply the strictest margin.
 
 ---
 
@@ -376,16 +412,16 @@ The merger must process ~1.5 billion Gaia rows without materialising the full ca
 Merger run must produce:
 
 - **HEALPix-partitioned merged Parquet** — one directory per HEALPix pixel under `data/processed/merged/healpix/{pixel}/`, each containing one or more Parquet files. This is the input to downstream octree/index builds.
-- **Merge report JSON** — **aggregate counts only**, not per-row data. Must include: counts by category (unmatched Gaia, unmatched HIP, matched-pair winners by catalog, override actions by type), `merge_policy_version` (e.g. `"v1"`), HEALPix order and nside, and full input file manifest (Gaia directory, HIP path, crossmatch path, overrides path). This must remain a small fixed-size document regardless of catalog size. Do not accumulate per-row state for the ~1.5B unmatched Gaia rows.
+- **Merge report JSON** — **aggregate counts only**, not per-row data. Must include: counts by category (unmatched Gaia, unmatched HIP, matched-pair winners by catalog, override actions by type), HEALPix order and nside, and full input file manifest (Gaia directory, HIP path, crossmatch path, overrides path). This must remain a small fixed-size document regardless of catalog size. Do not accumulate per-row state for the ~1.5B unmatched Gaia rows.
 - **Decision / override audit sidecar** (Parquet) — per M5, recording every **matched-pair decision** and **override action** including suppressed partners. This sidecar is bounded by the crossmatch table size (~100K rows) plus the override count (~tens of rows), not by the full catalog size. Unmatched rows (which make up the vast majority of the 1.5B Gaia catalog) are **not** recorded individually — they are accounted for only in the aggregate report counts.
 
 ---
 
 ## Resolved decisions
 
-The following were resolved before the first merger implementation:
+The following were resolved during merger development:
 
-1. **Matched-pair winner policy v1** — Compare `astrometry_quality` directly (lower wins). Both pipelines produce comparable fractional parallax error; Gaia fallback-tier sentinels (10/20/50) sort correctly against real measurements. Tie-break: prefer Gaia, then lower `source_id`. See "Quality scoring contract" above for details.
+1. **Matched-pair winner policy** — Gaia wins by default. Hipparcos is only eligible under controlled conditions: standard single-star solution (Sn=5), unambiguous crossmatch (single neighbour), and a magnitude-dependent margin requirement. See "Quality scoring contract / Decision tree" above for the full rules.
 
 2. **Canonical identity for `replace` actions** — Replacement rows always retain the original target's `source` / `source_id` as canonical identity. The override swaps the payload only; identity is never remapped.
 

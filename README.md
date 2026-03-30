@@ -23,7 +23,7 @@ Per-catalog CLIs produce staging Parquet. The **merge** step (see `docs/mergers.
 2. Run an **overrides pipeline** that normalizes a versioned **manual overrides** table (e.g. missing objects like the Sun, or replacements where Hipparcos binary solutions are poor).
 3. **Merge** using a cross-match table, quality scoring for Gaia-vs-Hip pairs, with **manual overrides taking precedence** over automatic winners.
 4. Emit a **dense** merged table suitable for Stage 00, partitioned by **HEALPix** for efficient downstream octree or spatial queries.
-5. Emit **sparse sidecars** (identifiers, HD/Bayer designations, merge decisions) keyed by canonical `source_id`, so rare columns are not duplicated on every row.
+5. Emit **sparse sidecars** (identifiers, HD/Bayer designations, merge decisions) keyed by canonical `(source, source_id)`, so rare columns are not duplicated on every row.
 
 ### Documentation ownership boundary
 

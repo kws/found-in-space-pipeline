@@ -20,6 +20,9 @@ from foundinspace.pipeline.hipparcos.photometry import (
 
 _LOG = logging.getLogger(__name__)
 
+HIP_AUXILIARY_COLS = ["Sn", "Hpmag"]
+HIP_OUTPUT_COLS = OUTPUT_COLS + HIP_AUXILIARY_COLS
+
 _COLUMN_RENAMES = {
     "HIP": "source_id",
     "RArad": "ra_deg",
@@ -63,6 +66,9 @@ def _run_hipparcos_pipeline(df: pd.DataFrame) -> pd.DataFrame:
     work = compute_teff_hip(work)
     work["source"] = "hip"
     work["source_id"] = work["source_id"].astype("uint64")
+    for col in HIP_AUXILIARY_COLS:
+        if col not in work.columns:
+            work[col] = np.nan
     ok = np.isfinite(work["distance_use_pc"].to_numpy(dtype=float, copy=False))
     n_drop = int((~ok).sum())
     if n_drop:
@@ -76,7 +82,7 @@ def _run_hipparcos_pipeline(df: pd.DataFrame) -> pd.DataFrame:
             flush=True,
         )
         work = work.loc[ok].reset_index(drop=True)
-    return work[OUTPUT_COLS]
+    return work[HIP_OUTPUT_COLS]
 
 
 def main(

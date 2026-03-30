@@ -19,11 +19,28 @@ from tqdm.auto import tqdm
 from foundinspace.pipeline.constants import OUTPUT_COLS
 
 _LOG = logging.getLogger(__name__)
-MERGE_POLICY_VERSION = "v1"
 MERGE_BATCH_SIZE = 1_000_000
 
 # Merged HEALPix shards use the same schema as per-catalog OUTPUT_COLS (canonical identity only).
 MERGED_OUTPUT_COLS = list(OUTPUT_COLS)
+
+# ---------------------------------------------------------------------------
+# Merge policy thresholds
+# ---------------------------------------------------------------------------
+# Hip wins only if hip_score < gaia_score * HIP_MARGIN_*.  Lower margin = harder for Hip.
+BRIGHT_AUTO_MAG = 3.5
+BRIGHT_REVIEW_MAG = 6.0
+HIP_MARGIN_VERY_BRIGHT = 1.0  # G < 3.5: Hip wins if strictly better
+HIP_MARGIN_BRIGHT = 0.6       # 3.5 <= G < 6: Hip must be ≥40% better
+HIP_MARGIN_NORMAL = 0.5       # G >= 6: Hip must be ≥50% better
+
+RUWE_WARN_THRESHOLD = 1.4
+HIP_SOLUTION_STANDARD = 5     # Hipparcos Sn=5 = standard 5-param single-star
+
+# Auxiliary columns expected from widened catalog pipelines (gracefully absent).
+_GAIA_AUX_COLS = ["ruwe", "phot_g_mean_mag"]
+_HIP_AUX_COLS = ["Sn", "Hpmag"]
+_CROSS_AUX_COLS = ["number_of_neighbours", "angular_distance"]
 
 DECISION_COLS = [
     "decision_type",
@@ -39,6 +56,12 @@ DECISION_COLS = [
     "override_reason",
     "override_policy_version",
     "note",
+    "number_of_neighbours",
+    "angular_distance_arcsec",
+    "gaia_ruwe",
+    "gaia_phot_g_mean_mag",
+    "hip_solution_type",
+    "hip_apparent_mag",
 ]
 
 DROP_OVERRIDE_PAYLOAD_COLS = [col for col in OUTPUT_COLS if col not in {"source", "source_id"}]
@@ -48,7 +71,6 @@ DROP_OVERRIDE_PAYLOAD_COLS = [col for col in OUTPUT_COLS if col not in {"source"
 class MergeReport:
     """Small aggregate report for one merge run."""
 
-    merge_policy_version: str
     healpix_order: int
     healpix_nside: int
     gaia_dir: str
@@ -93,16 +115,76 @@ def _safe_score(value: Any) -> float:
     return score if math.isfinite(score) else math.inf
 
 
-def _choose_matched_winner(gaia_row: dict[str, Any], hip_row: dict[str, Any]) -> tuple[str, str]:
-    """Return (winner_catalog, tie_break_reason)."""
+def _safe_float(value: Any) -> float:
+    """Coerce to float; return NaN for missing / non-numeric values."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return math.nan
+    return v
+
+
+def _safe_int(value: Any, default: int | None = None) -> int | None:
+    """Coerce to int; return *default* for missing / non-numeric values."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return default
+    if not math.isfinite(v):
+        return default
+    return int(v)
+
+
+def _choose_matched_winner(
+    gaia_row: dict[str, Any],
+    hip_row: dict[str, Any],
+    *,
+    number_of_neighbours: int | None = None,
+) -> tuple[str, str]:
+    """V2 winner selection: Gaia-default with vetoes, bright-star gate, and margin.
+
+    Returns (winner_catalog, tie_break_reason).
+    """
     gaia_score = _safe_score(gaia_row.get("astrometry_quality"))
     hip_score = _safe_score(hip_row.get("astrometry_quality"))
-    if gaia_score < hip_score:
-        return "gaia", ""
-    if hip_score < gaia_score:
+
+    # Veto 1: ambiguous crossmatch (multiple Gaia neighbours for this HIP entry)
+    if number_of_neighbours is not None and number_of_neighbours > 1:
+        return "gaia", "neighbour_veto"
+
+    # Veto 2: Hipparcos non-standard solution (likely multiplicity / acceleration)
+    hip_sn = _safe_int(hip_row.get("Sn"))
+    if hip_sn is not None and hip_sn != HIP_SOLUTION_STANDARD:
+        return "gaia", "hip_multiplicity"
+
+    # Bright-star gate: determine margin from Gaia apparent magnitude.
+    g_mag = _safe_float(gaia_row.get("phot_g_mean_mag"))
+    if not math.isfinite(g_mag):
+        # Fall back to distance-modulus estimate from the Gaia row's own data.
+        mag_abs = _safe_float(gaia_row.get("mag_abs"))
+        r_pc = _safe_float(gaia_row.get("r_pc"))
+        if math.isfinite(mag_abs) and r_pc > 0:
+            g_mag = mag_abs + 5.0 * math.log10(r_pc / 10.0)
+
+    if math.isfinite(g_mag) and g_mag < BRIGHT_AUTO_MAG:
+        margin = HIP_MARGIN_VERY_BRIGHT
+    elif math.isfinite(g_mag) and g_mag < BRIGHT_REVIEW_MAG:
+        margin = HIP_MARGIN_BRIGHT
+    else:
+        margin = HIP_MARGIN_NORMAL
+
+    if hip_score < gaia_score * margin:
         return "hip", ""
-    # Spec tie-break: prefer Gaia, then lower source_id.
-    return "gaia", "prefer_gaia"
+    if gaia_score <= hip_score:
+        return "gaia", ""
+    return "gaia", "gaia_margin"
+
+
+def _decision_record(**kwargs: Any) -> dict[str, Any]:
+    """Build a decision record with all DECISION_COLS, defaulting missing keys to pd.NA."""
+    rec: dict[str, Any] = {col: pd.NA for col in DECISION_COLS}
+    rec.update(kwargs)
+    return rec
 
 
 def _output_row(
@@ -300,12 +382,24 @@ def run_merge(
     # Load small lookup tables once.
     hip_df = _read_required_parquet(hip_path, OUTPUT_COLS)
     hip_df["source_id"] = pd.to_numeric(hip_df["source_id"], errors="raise").astype("uint64")
+    hip_load_cols = OUTPUT_COLS + [c for c in _HIP_AUX_COLS if c in hip_df.columns]
     hip_by_id: dict[int, dict[str, Any]] = {}
-    for rec in hip_df[OUTPUT_COLS].to_dict(orient="records"):
+    for rec in hip_df[hip_load_cols].to_dict(orient="records"):
         hip_by_id[int(rec["source_id"])] = rec
 
     cross_df = _read_required_parquet(crossmatch_path, ["gaia_source_id", "hip_source_id"])
     gaia_to_hip, hip_to_gaia = _build_crossmatch_maps(cross_df)
+
+    # V2: crossmatch auxiliary data (number_of_neighbours, angular_distance).
+    cross_aux_by_gaia: dict[int, dict[str, Any]] = {}
+    for col in _CROSS_AUX_COLS:
+        if col not in cross_df.columns:
+            cross_df[col] = np.nan
+    for rec in cross_df[["gaia_source_id", *_CROSS_AUX_COLS]].itertuples(index=False):
+        cross_aux_by_gaia[int(rec.gaia_source_id)] = {
+            "number_of_neighbours": _safe_int(rec.number_of_neighbours),
+            "angular_distance": _safe_float(rec.angular_distance),
+        }
 
     overrides_df = _read_required_parquet(
         overrides_path,
@@ -356,7 +450,6 @@ def run_merge(
                 gaia_special_ids.add(partner_gaia)
 
     report = MergeReport(
-        merge_policy_version=MERGE_POLICY_VERSION,
         healpix_order=healpix_order,
         healpix_nside=nside,
         gaia_dir=str(gaia_dir),
@@ -388,6 +481,8 @@ def run_merge(
         special_out_rows: list[dict[str, Any]] = []
         _validate_parquet_columns(gaia_file, OUTPUT_COLS)
         parquet_file = pq.ParquetFile(gaia_file)
+        file_col_names = set(parquet_file.schema_arrow.names)
+        gaia_read_cols = OUTPUT_COLS + [c for c in _GAIA_AUX_COLS if c in file_col_names]
         gaia_num_rows = parquet_file.metadata.num_rows
         batch_bar_total = (
             (gaia_num_rows + MERGE_BATCH_SIZE - 1) // MERGE_BATCH_SIZE
@@ -397,7 +492,7 @@ def run_merge(
         for batch in tqdm(
             parquet_file.iter_batches(
                 batch_size=MERGE_BATCH_SIZE,
-                columns=OUTPUT_COLS,
+                columns=gaia_read_cols,
             ),
             desc=f"Batches ({gaia_file.stem})",
             unit="batch",
@@ -425,7 +520,8 @@ def run_merge(
                 report.rows_emitted_total += written
                 report.unmatched_gaia += written
 
-            special_rows = gaia_df.loc[special_mask, OUTPUT_COLS].to_dict(orient="records")
+            special_read_cols = [c for c in gaia_read_cols if c in gaia_df.columns]
+            special_rows = gaia_df.loc[special_mask, special_read_cols].to_dict(orient="records")
             for gaia_rec in special_rows:
                 gaia_id = int(gaia_rec["source_id"])
                 hip_id = gaia_to_hip.get(gaia_id)
@@ -459,25 +555,26 @@ def run_merge(
                     if hip_id is None:
                         note = "partner_missing"
                     decisions.append(
-                        {
-                            "decision_type": "override",
-                            "gaia_source_id": str(gaia_id),
-                            "hip_source_id": str(hip_id) if hip_id is not None else pd.NA,
-                            "winner_catalog": winner_catalog or pd.NA,
-                            "winner_source_id": winner_source_id or pd.NA,
-                            "gaia_score": _safe_score(gaia_rec.get("astrometry_quality")),
-                            "hip_score": _safe_score(
-                                hip_rec.get("astrometry_quality") if hip_rec is not None else np.nan
+                        _decision_record(
+                            decision_type="override",
+                            gaia_source_id=str(gaia_id),
+                            hip_source_id=str(hip_id) if hip_id is not None else pd.NA,
+                            winner_catalog=winner_catalog or pd.NA,
+                            winner_source_id=winner_source_id or pd.NA,
+                            gaia_score=_safe_score(gaia_rec.get("astrometry_quality")),
+                            hip_score=_safe_score(
+                                hip_rec.get("astrometry_quality")
+                                if hip_rec is not None
+                                else np.nan
                             ),
-                            "tie_break_reason": pd.NA,
-                            "override_id": override_id,
-                            "override_action": action,
-                            "override_reason": override.get("override_reason", pd.NA),
-                            "override_policy_version": override.get(
+                            override_id=override_id,
+                            override_action=action,
+                            override_reason=override.get("override_reason", pd.NA),
+                            override_policy_version=override.get(
                                 "override_policy_version", pd.NA
                             ),
-                            "note": note or pd.NA,
-                        }
+                            note=note or pd.NA,
+                        )
                     )
                     continue
 
@@ -486,7 +583,12 @@ def run_merge(
                     report.unmatched_gaia += 1
                     continue
 
-                winner_catalog, tie_break_reason = _choose_matched_winner(gaia_rec, hip_rec)
+                cross_aux = cross_aux_by_gaia.get(gaia_id, {})
+                n_neighbours = cross_aux.get("number_of_neighbours")
+
+                winner_catalog, tie_break_reason = _choose_matched_winner(
+                    gaia_rec, hip_rec, number_of_neighbours=n_neighbours,
+                )
                 if winner_catalog == "gaia":
                     winner_row = _output_row(
                         gaia_rec,
@@ -500,24 +602,38 @@ def run_merge(
                 special_out_rows.append(winner_row)
                 resolved_hip_ids.add(int(hip_id))
                 report.matched_pairs_scored += 1
+                _ruwe = _safe_float(gaia_rec.get("ruwe"))
+                _gmag = _safe_float(gaia_rec.get("phot_g_mean_mag"))
+                _sn = _safe_int(hip_rec.get("Sn"))
+                _hmag = _safe_float(hip_rec.get("Hpmag"))
+                _ang = _safe_float(cross_aux.get("angular_distance", math.nan))
                 decisions.append(
-                    {
-                        "decision_type": "score",
-                        "gaia_source_id": str(gaia_id),
-                        "hip_source_id": str(hip_id),
-                        "winner_catalog": winner_catalog,
-                        "winner_source_id": str(
+                    _decision_record(
+                        decision_type="score",
+                        gaia_source_id=str(gaia_id),
+                        hip_source_id=str(hip_id),
+                        winner_catalog=winner_catalog,
+                        winner_source_id=str(
                             gaia_id if winner_catalog == "gaia" else int(hip_id)
                         ),
-                        "gaia_score": _safe_score(gaia_rec.get("astrometry_quality")),
-                        "hip_score": _safe_score(hip_rec.get("astrometry_quality")),
-                        "tie_break_reason": tie_break_reason or pd.NA,
-                        "override_id": pd.NA,
-                        "override_action": pd.NA,
-                        "override_reason": pd.NA,
-                        "override_policy_version": pd.NA,
-                        "note": pd.NA,
-                    }
+                        gaia_score=_safe_score(gaia_rec.get("astrometry_quality")),
+                        hip_score=_safe_score(hip_rec.get("astrometry_quality")),
+                        tie_break_reason=tie_break_reason or pd.NA,
+                        number_of_neighbours=n_neighbours
+                        if n_neighbours is not None
+                        else pd.NA,
+                        angular_distance_arcsec=_ang
+                        if math.isfinite(_ang)
+                        else pd.NA,
+                        gaia_ruwe=_ruwe if math.isfinite(_ruwe) else pd.NA,
+                        gaia_phot_g_mean_mag=_gmag
+                        if math.isfinite(_gmag)
+                        else pd.NA,
+                        hip_solution_type=_sn if _sn is not None else pd.NA,
+                        hip_apparent_mag=_hmag
+                        if math.isfinite(_hmag)
+                        else pd.NA,
+                    )
                 )
 
         if special_out_rows:
@@ -561,27 +677,25 @@ def run_merge(
             else:
                 raise ValueError(f"Unsupported override action for HIP flush path: {action}")
             decisions.append(
-                {
-                    "decision_type": "override",
-                    "gaia_source_id": str(gaia_id) if gaia_id is not None else pd.NA,
-                    "hip_source_id": str(hip_id),
-                    "winner_catalog": "manual" if action == "replace" else pd.NA,
-                    "winner_source_id": str(override["source_id"])
+                _decision_record(
+                    decision_type="override",
+                    gaia_source_id=str(gaia_id) if gaia_id is not None else pd.NA,
+                    hip_source_id=str(hip_id),
+                    winner_catalog="manual" if action == "replace" else pd.NA,
+                    winner_source_id=str(override["source_id"])
                     if action == "replace"
                     else pd.NA,
-                    "gaia_score": pd.NA,
-                    "hip_score": _safe_score(hip_rec.get("astrometry_quality")),
-                    "tie_break_reason": pd.NA,
-                    "override_id": override_id,
-                    "override_action": action,
-                    "override_reason": override.get("override_reason", pd.NA),
-                    "override_policy_version": override.get("override_policy_version", pd.NA),
-                    "note": "resolved_in_hip_flush"
-                    if gaia_id is not None and ("gaia", gaia_id) == _normalize_key(
-                        override["source"], override["source_id"]
-                    )
+                    hip_score=_safe_score(hip_rec.get("astrometry_quality")),
+                    override_id=override_id,
+                    override_action=action,
+                    override_reason=override.get("override_reason", pd.NA),
+                    override_policy_version=override.get("override_policy_version", pd.NA),
+                    note="resolved_in_hip_flush"
+                    if gaia_id is not None
+                    and ("gaia", gaia_id)
+                    == _normalize_key(override["source"], override["source_id"])
                     else pd.NA,
-                }
+                )
             )
             continue
 
@@ -615,21 +729,15 @@ def run_merge(
         add_rows.append(_output_row(ov))
         report.override_add_applied += 1
         decisions.append(
-            {
-                "decision_type": "override_add",
-                "gaia_source_id": pd.NA,
-                "hip_source_id": pd.NA,
-                "winner_catalog": "manual",
-                "winner_source_id": str(ov["source_id"]),
-                "gaia_score": pd.NA,
-                "hip_score": pd.NA,
-                "tie_break_reason": pd.NA,
-                "override_id": override_id,
-                "override_action": "add",
-                "override_reason": ov.get("override_reason", pd.NA),
-                "override_policy_version": ov.get("override_policy_version", pd.NA),
-                "note": pd.NA,
-            }
+            _decision_record(
+                decision_type="override_add",
+                winner_catalog="manual",
+                winner_source_id=str(ov["source_id"]),
+                override_id=override_id,
+                override_action="add",
+                override_reason=ov.get("override_reason", pd.NA),
+                override_policy_version=ov.get("override_policy_version", pd.NA),
+            )
         )
 
     if add_rows:
@@ -656,21 +764,14 @@ def run_merge(
             ov.get("source_id"),
         )
         decisions.append(
-            {
-                "decision_type": "override_no_effect",
-                "gaia_source_id": pd.NA,
-                "hip_source_id": pd.NA,
-                "winner_catalog": pd.NA,
-                "winner_source_id": pd.NA,
-                "gaia_score": pd.NA,
-                "hip_score": pd.NA,
-                "tie_break_reason": pd.NA,
-                "override_id": override_id,
-                "override_action": ov.get("action", pd.NA),
-                "override_reason": ov.get("override_reason", pd.NA),
-                "override_policy_version": ov.get("override_policy_version", pd.NA),
-                "note": "target_and_partner_absent",
-            }
+            _decision_record(
+                decision_type="override_no_effect",
+                override_id=override_id,
+                override_action=ov.get("action", pd.NA),
+                override_reason=ov.get("override_reason", pd.NA),
+                override_policy_version=ov.get("override_policy_version", pd.NA),
+                note="target_and_partner_absent",
+            )
         )
 
     expected_rows_emitted = (

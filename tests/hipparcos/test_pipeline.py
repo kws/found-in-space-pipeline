@@ -10,7 +10,12 @@ from click.testing import CliRunner
 
 from foundinspace.pipeline.constants import OUTPUT_COLS
 from foundinspace.pipeline.hipparcos.cli import cli
-from foundinspace.pipeline.hipparcos.pipeline import _run_hipparcos_pipeline, main
+from foundinspace.pipeline.hipparcos.pipeline import (
+    HIP_AUXILIARY_COLS,
+    HIP_OUTPUT_COLS,
+    _run_hipparcos_pipeline,
+    main,
+)
 
 
 def _sample_hip_df() -> pd.DataFrame:
@@ -18,6 +23,7 @@ def _sample_hip_df() -> pd.DataFrame:
         [
             {
                 "HIP": 1,
+                "Sn": 5,
                 "RArad": 10.0,
                 "DErad": 20.0,
                 "Plx": 10.0,
@@ -29,6 +35,7 @@ def _sample_hip_df() -> pd.DataFrame:
             },
             {
                 "HIP": 2,
+                "Sn": 5,
                 "RArad": 30.0,
                 "DErad": -10.0,
                 "Plx": 5.0,
@@ -70,10 +77,16 @@ def _write_ecsv(df: pd.DataFrame, path: Path) -> None:
 
 def test_run_pipeline_outputs_canonical_schema_and_source_fields():
     out = _run_hipparcos_pipeline(_sample_hip_df())
-    assert list(out.columns) == OUTPUT_COLS
+    assert list(out.columns) == HIP_OUTPUT_COLS
+    for col in OUTPUT_COLS:
+        assert col in out.columns
+    for col in HIP_AUXILIARY_COLS:
+        assert col in out.columns
     assert (out["source"] == "hip").all()
     assert out["source_id"].dtype == "uint64"
     assert out["source_id"].tolist() == [1, 2]
+    assert out["Sn"].tolist() == [5, 5]
+    assert out["Hpmag"].tolist() == [7.0, 9.0]
 
 
 def test_run_pipeline_drops_invalid_parallax_rows():
@@ -110,7 +123,8 @@ def test_main_writes_parquet_with_limit(tmp_path: Path):
     assert output_file.exists()
     out = pd.read_parquet(output_file)
     assert len(out) == 1
-    assert list(out.columns) == OUTPUT_COLS
+    for col in OUTPUT_COLS:
+        assert col in out.columns
     assert out["source"].iloc[0] == "hip"
     assert out["source_id"].iloc[0] == 1
 

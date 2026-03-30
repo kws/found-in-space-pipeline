@@ -10,7 +10,13 @@ import pyarrow.parquet as pq
 import pytest
 
 from foundinspace.pipeline.constants import OUTPUT_COLS
-from foundinspace.pipeline.merge.pipeline import run_merge
+from foundinspace.pipeline.merge.pipeline import (
+    _choose_matched_winner,
+    _safe_float,
+    _safe_int,
+    _safe_score,
+    run_merge,
+)
 
 
 def _write_parquet(df: pd.DataFrame, path: Path) -> None:
@@ -326,7 +332,6 @@ def test_run_merge_streaming_with_overrides_and_missing_partners(tmp_path: Path)
     report_json = json.loads((output_dir / "merge_report.json").read_text(encoding="utf-8"))
     assert report_json["rows_emitted_total"] == 7
     assert report_json["healpix_order"] == 1
-    assert report_json["merge_policy_version"] == "v1"
     assert report_json["gaia_dir"] == str(gaia_dir)
     assert report_json["hip_path"] == str(hip_path)
     assert report_json["crossmatch_path"] == str(crossmatch_path)
@@ -403,4 +408,162 @@ def test_run_merge_rejects_drop_override_with_payload(tmp_path: Path):
             healpix_order=1,
             force=True,
         )
+
+
+# ---------------------------------------------------------------------------
+# V2 policy unit tests for _choose_matched_winner
+# ---------------------------------------------------------------------------
+
+def _gaia_row(score: float, *, phot_g_mean_mag: float | None = None, **kw) -> dict:
+    row: dict = {"astrometry_quality": score}
+    if phot_g_mean_mag is not None:
+        row["phot_g_mean_mag"] = phot_g_mean_mag
+    row.update(kw)
+    return row
+
+
+def _hip_row(score: float, *, Sn: int | None = None, **kw) -> dict:
+    row: dict = {"astrometry_quality": score}
+    if Sn is not None:
+        row["Sn"] = Sn
+    row.update(kw)
+    return row
+
+
+class TestChooseMatchedWinnerV2:
+    """Tests for merge winner selection logic."""
+
+    def test_gaia_wins_when_better(self):
+        winner, reason = _choose_matched_winner(
+            _gaia_row(0.05, phot_g_mean_mag=8.0),
+            _hip_row(0.10, Sn=5),
+        )
+        assert winner == "gaia"
+
+    def test_gaia_wins_on_tie(self):
+        winner, reason = _choose_matched_winner(
+            _gaia_row(0.10, phot_g_mean_mag=8.0),
+            _hip_row(0.10, Sn=5),
+        )
+        assert winner == "gaia"
+
+    def test_neighbour_veto_forces_gaia(self):
+        winner, reason = _choose_matched_winner(
+            _gaia_row(0.50, phot_g_mean_mag=8.0),
+            _hip_row(0.01, Sn=5),
+            number_of_neighbours=3,
+        )
+        assert winner == "gaia"
+        assert reason == "neighbour_veto"
+
+    def test_hip_multiplicity_veto(self):
+        winner, reason = _choose_matched_winner(
+            _gaia_row(0.50, phot_g_mean_mag=2.0),
+            _hip_row(0.01, Sn=95),
+        )
+        assert winner == "gaia"
+        assert reason == "hip_multiplicity"
+
+    def test_hip_sn5_no_veto(self):
+        """Sn=5 (standard single-star) should not trigger veto."""
+        winner, reason = _choose_matched_winner(
+            _gaia_row(0.50, phot_g_mean_mag=2.0),
+            _hip_row(0.01, Sn=5),
+        )
+        assert winner == "hip"
+
+    def test_very_bright_hip_wins_if_better(self):
+        """G < 3.5: margin=1.0, so Hip wins if strictly better."""
+        winner, reason = _choose_matched_winner(
+            _gaia_row(0.10, phot_g_mean_mag=2.0),
+            _hip_row(0.05, Sn=5),
+        )
+        assert winner == "hip"
+
+    def test_bright_hip_needs_large_margin(self):
+        """3.5 <= G < 6: margin=0.6, so Hip score must be < gaia*0.6."""
+        winner, reason = _choose_matched_winner(
+            _gaia_row(0.10, phot_g_mean_mag=5.0),
+            _hip_row(0.08, Sn=5),
+        )
+        assert winner == "gaia"
+        assert reason == "gaia_margin"
+
+    def test_bright_hip_wins_with_large_margin(self):
+        """3.5 <= G < 6: Hip score 0.04 < gaia 0.10 * 0.6 = 0.06 → Hip wins."""
+        winner, reason = _choose_matched_winner(
+            _gaia_row(0.10, phot_g_mean_mag=5.0),
+            _hip_row(0.04, Sn=5),
+        )
+        assert winner == "hip"
+
+    def test_normal_hip_needs_very_large_margin(self):
+        """G >= 6: margin=0.5, Hip needs to be ≥50% better."""
+        winner, reason = _choose_matched_winner(
+            _gaia_row(0.10, phot_g_mean_mag=8.0),
+            _hip_row(0.06, Sn=5),
+        )
+        assert winner == "gaia"
+        assert reason == "gaia_margin"
+
+    def test_normal_hip_wins_with_very_large_margin(self):
+        """G >= 6: Hip score 0.04 < gaia 0.10 * 0.5 = 0.05 → Hip wins."""
+        winner, reason = _choose_matched_winner(
+            _gaia_row(0.10, phot_g_mean_mag=8.0),
+            _hip_row(0.04, Sn=5),
+        )
+        assert winner == "hip"
+
+    def test_missing_gmag_uses_distance_modulus_fallback(self):
+        """Without phot_g_mean_mag, falls back to mag_abs + 5*log10(r_pc/10)."""
+        winner, reason = _choose_matched_winner(
+            _gaia_row(0.10, mag_abs=-1.0, r_pc=1.0),
+            _hip_row(0.05, Sn=5),
+        )
+        # apparent G ≈ -1.0 + 5*log10(0.1) = -6.0 → very bright → margin=1.0
+        assert winner == "hip"
+
+    def test_missing_aux_columns_defaults_to_normal_margin(self):
+        """Without any magnitude info, defaults to normal (strictest) margin."""
+        winner, reason = _choose_matched_winner(
+            _gaia_row(0.10),
+            _hip_row(0.06),
+        )
+        assert winner == "gaia"
+        assert reason == "gaia_margin"
+
+    def test_missing_sn_no_veto(self):
+        """Missing Sn should not trigger multiplicity veto."""
+        winner, reason = _choose_matched_winner(
+            _gaia_row(0.50, phot_g_mean_mag=2.0),
+            _hip_row(0.01),
+        )
+        assert winner == "hip"
+
+
+class TestSafeHelpers:
+    def test_safe_float_normal(self):
+        assert _safe_float(3.14) == pytest.approx(3.14)
+
+    def test_safe_float_none(self):
+        assert math.isnan(_safe_float(None))
+
+    def test_safe_float_string(self):
+        assert math.isnan(_safe_float("bad"))
+
+    def test_safe_int_normal(self):
+        assert _safe_int(5) == 5
+
+    def test_safe_int_float(self):
+        assert _safe_int(5.0) == 5
+
+    def test_safe_int_none(self):
+        assert _safe_int(None) is None
+
+    def test_safe_int_nan(self):
+        assert _safe_int(float("nan")) is None
+
+    def test_safe_score_inf_on_missing(self):
+        assert _safe_score(None) == math.inf
+        assert _safe_score(float("nan")) == math.inf
 

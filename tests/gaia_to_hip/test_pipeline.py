@@ -20,18 +20,10 @@ def test_build_gaia_hip_mapping_from_dataframe_filters_and_normalizes():
 
     out = gh.build_gaia_hip_mapping_from_dataframe(df)
 
-    assert out.to_dict(orient="records") == [
-        {
-            "gaia_source_id": 1,
-            "hip_source_id": 10,
-            "mapping_source": gh.MAPPING_SOURCE_HIPPARCOS2_BEST_NEIGHBOUR,
-        },
-        {
-            "gaia_source_id": 5,
-            "hip_source_id": 7,
-            "mapping_source": gh.MAPPING_SOURCE_HIPPARCOS2_BEST_NEIGHBOUR,
-        },
-    ]
+    assert len(out) == 2
+    assert out["gaia_source_id"].tolist() == [1, 5]
+    assert out["hip_source_id"].tolist() == [10, 7]
+    assert (out["mapping_source"] == gh.MAPPING_SOURCE_HIPPARCOS2_BEST_NEIGHBOUR).all()
     assert list(out.columns) == gh.GAIA_HIP_MAP_COLS
 
 
@@ -61,8 +53,8 @@ def test_prepare_gaia_hip_mapping_writes_parquet(tmp_path: Path):
     ecsv = tmp_path / "cross.ecsv"
     out_parquet = tmp_path / "map.parquet"
     t = Table(
-        rows=[[100, 42], [200, 99]],
-        names=("source_id", "original_ext_source_id"),
+        rows=[[100, 42, 0.005, 1], [200, 99, 0.010, 2]],
+        names=("source_id", "original_ext_source_id", "angular_distance", "number_of_neighbours"),
     )
     t.write(ecsv, format="ascii.ecsv", overwrite=True)
 
@@ -73,6 +65,8 @@ def test_prepare_gaia_hip_mapping_writes_parquet(tmp_path: Path):
     assert list(read_back.columns) == gh.GAIA_HIP_MAP_COLS
     assert read_back["gaia_source_id"].tolist() == [100, 200]
     assert read_back["hip_source_id"].tolist() == [42, 99]
+    assert read_back["number_of_neighbours"].tolist() == [1, 2]
+    assert read_back["angular_distance"].tolist() == pytest.approx([0.005, 0.010], abs=1e-6)
 
 
 def test_prepare_gaia_hip_mapping_raises_when_output_exists(tmp_path: Path):

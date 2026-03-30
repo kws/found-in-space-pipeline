@@ -5,9 +5,10 @@ import pandas as pd
 
 from foundinspace.pipeline.constants import OUTPUT_COLS
 from foundinspace.pipeline.gaia import pipeline as gaia_pipeline
+from foundinspace.pipeline.gaia.pipeline import GAIA_AUXILIARY_COLS, GAIA_OUTPUT_COLS
 
 
-def test_run_pipeline_batch_still_emits_output_cols(monkeypatch):
+def test_run_pipeline_batch_emits_output_cols_plus_auxiliary(monkeypatch):
     def _select(df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame({"source_id": [1, 2]})
 
@@ -42,6 +43,10 @@ def test_run_pipeline_batch_still_emits_output_cols(monkeypatch):
 
     out = gaia_pipeline._run_gaia_pipeline_batch(pd.DataFrame({"source_id": [1, 2]}))
 
-    assert list(out.columns) == OUTPUT_COLS
+    assert list(out.columns) == GAIA_OUTPUT_COLS
+    for col in OUTPUT_COLS:
+        assert col in out.columns
+    for col in GAIA_AUXILIARY_COLS:
+        assert col in out.columns
     assert (out["source"] == "gaia").all()
     assert out["source_id"].dtype == "uint64"

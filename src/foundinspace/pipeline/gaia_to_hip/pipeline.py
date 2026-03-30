@@ -10,7 +10,13 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from astropy.table import Table
 
-GAIA_HIP_MAP_COLS = ["gaia_source_id", "hip_source_id", "mapping_source"]
+GAIA_HIP_MAP_COLS = [
+    "gaia_source_id",
+    "hip_source_id",
+    "mapping_source",
+    "number_of_neighbours",
+    "angular_distance",
+]
 MAPPING_SOURCE_HIPPARCOS2_BEST_NEIGHBOUR = "hipparcos2_best_neighbour"
 
 
@@ -18,9 +24,11 @@ def empty_gaia_hip_mapping() -> pd.DataFrame:
     """Return an empty Gaia↔HIP mapping frame with stable dtypes."""
     return pd.DataFrame(
         {
-            "gaia_source_id": pd.Series(dtype="uint64"),
-            "hip_source_id": pd.Series(dtype="uint64"),
+            "gaia_source_id": pd.Series(dtype=np.uint64),
+            "hip_source_id": pd.Series(dtype=np.uint64),
             "mapping_source": pd.Series(dtype="object"),
+            "number_of_neighbours": pd.Series(dtype=np.int16),
+            "angular_distance": pd.Series(dtype=np.float32),
         }
     )
 
@@ -64,6 +72,24 @@ def build_gaia_hip_mapping_from_dataframe(df: pd.DataFrame) -> pd.DataFrame:
             "mapping_source": MAPPING_SOURCE_HIPPARCOS2_BEST_NEIGHBOUR,
         }
     )
+
+    n_neigh_col = "number_of_neighbours"
+    ang_dist_col = "angular_distance"
+    if n_neigh_col in df.columns:
+        out[n_neigh_col] = (
+            pd.to_numeric(df.loc[valid, n_neigh_col].values, errors="coerce")
+            .astype(np.float32)
+            .astype(np.int16)
+        )
+    else:
+        out[n_neigh_col] = np.int16(0)
+    if ang_dist_col in df.columns:
+        out[ang_dist_col] = pd.to_numeric(
+            df.loc[valid, ang_dist_col].values, errors="coerce"
+        ).astype(np.float32)
+    else:
+        out[ang_dist_col] = np.float32(np.nan)
+
     out = out.drop_duplicates(subset=["gaia_source_id", "hip_source_id"])
     return out.sort_values(
         by=["gaia_source_id", "hip_source_id"],
