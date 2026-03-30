@@ -18,7 +18,7 @@ def _load_project_or_die(project_path: Path):
         raise click.ClickException(str(exc)) from exc
 
 
-@cli.command(name="import")
+@cli.command(name="build")
 @click.option(
     "--project",
     "project_path",
@@ -32,7 +32,7 @@ def _load_project_or_die(project_path: Path):
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
 )
 @click.option("--force", "-f", is_flag=True, default=False)
-def import_gaia(
+def build_gaia(
     project_path: Path,
     input_files: list[Path],
     force: bool = False,

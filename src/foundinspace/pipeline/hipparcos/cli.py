@@ -22,37 +22,6 @@ def _load_project_or_die(project_path: Path):
         raise click.ClickException(str(exc)) from exc
 
 
-@cli.command(name="prepare")
-@click.option(
-    "--project",
-    "project_path",
-    required=True,
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    help="Path to pipeline project TOML.",
-)
-@click.option("--force", "-f", is_flag=True, default=False)
-@click.option("--limit", "-l", type=int, default=None)
-def prepare_hip(
-    project_path: Path,
-    force: bool = False,
-    limit: int | None = None,
-):
-    project = _load_project_or_die(project_path)
-    resolved_input = project.hip.download_ecsv
-    if not resolved_input.exists():
-        raise click.BadParameter(
-            (
-                f"Input file does not exist: {resolved_input}. "
-                "Run `fis-pipeline hip download --project <path>` first."
-            ),
-            param_hint="--project",
-        )
-
-    output_file = project.hip.output_parquet
-    output_file.parent.mkdir(parents=True, exist_ok=True)
-    main(resolved_input, output_file, skip_if_exists=not force, limit=limit)
-
-
 @cli.command(name="build")
 @click.option(
     "--project",

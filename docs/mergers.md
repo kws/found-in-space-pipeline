@@ -82,7 +82,7 @@ Required:
 
 Optional:
 
-- A provisional Gaia-import mapping sidecar (when Gaia input includes HIP identifiers) to reduce re-scan cost. This artifact is advisory and can be superseded by merge-time crossmatch/override resolution.
+- A provisional mapping sidecar derived from Gaia catalog rows (when Gaia input includes HIP identifiers) to reduce re-scan cost. This artifact is advisory and can be superseded by merge-time crossmatch/override resolution.
 
 ---
 
@@ -171,7 +171,7 @@ Override YAML targets a **single** row by (`source`, `source_id`). The merger re
 
 ### Magnitude-limited Gaia subsets and missing crossmatch partners
 
-Gaia data may be imported with a magnitude limit (`--mag-limit`), so a Gaia `source_id` present in the crossmatch table may have **no corresponding row** in the actual Gaia batch files. The merger must handle this gracefully in both override and non-override paths.
+Gaia staging data may be filtered with `[gaia] mag_limit` in the project file, so a Gaia `source_id` present in the crossmatch table may have **no corresponding row** in the actual Gaia batch files. The merger must handle this gracefully in both override and non-override paths.
 
 **Non-override path (matched pairs with a missing side):**
 
@@ -376,7 +376,7 @@ At ~1.5 billion rows, post-hoc full-catalog scans are not practical. Validations
 ### By construction (no runtime check needed)
 
 5. **No duplicate canonical `(source, source_id)`** — guaranteed by the algorithm: Gaia source_ids are unique within Gaia (catalog guarantee), HIP source_ids are unique within HIP, matched pairs always use the HIP identity and emit exactly one winner, and `manual` namespace IDs are string-valued and cannot collide with numeric catalog IDs.
-6. **All matched pairs resolved** — the streaming pass processes every Gaia row encountered in the batch files, and the HIP flush processes every remaining HIP row. Under magnitude-limited Gaia imports, many crossmatch entries will reference absent Gaia rows; these are not matched pairs (see "Magnitude-limited Gaia subsets") and require no resolution.
+6. **All matched pairs resolved** — the streaming pass processes every Gaia row encountered in the batch files, and the HIP flush processes every remaining HIP row. Under magnitude-limited Gaia subsets, many crossmatch entries will reference absent Gaia rows; these are not matched pairs (see "Magnitude-limited Gaia subsets") and require no resolution.
 7. **Non-null geometry/magnitude** — upstream pipeline responsibility. The Gaia and Hipparcos pipelines validate their own output; the merger does not re-check per-row data quality on 1.5B rows.
 
 ---
@@ -434,4 +434,4 @@ The following were resolved during merger development:
 - A "merge plan now, apply later" strategy adds pipeline complexity with little benefit; current recommendation is direct merge after catalog preprocessing and before Stage 00.
 - Full reverse lookup indices remain serving-layer artifacts.
 - HEALPix level for **serving shards** may differ from HEALPix used only for **Gaia download batching**; document the level used for merged output.
-- Gaia-import sidecars can provide convenient Gaia↔HIP mapping hints, but merge outputs remain the canonical source of truth for identity after overrides and winner selection.
+- Mapping sidecars derived from Gaia catalog input can provide convenient Gaia↔HIP hints, but merge outputs remain the canonical source of truth for identity after overrides and winner selection.

@@ -41,32 +41,6 @@ def _overrides_data_dir(project) -> Path | None:
         return None
 
 
-@cli.command(name="prepare")
-@click.option(
-    "--project",
-    "project_path",
-    required=True,
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    help="Path to pipeline project TOML.",
-)
-@click.option("--force", "-f", is_flag=True, default=False)
-def prepare(
-    project_path: Path,
-    force: bool,
-) -> None:
-    project = _load_project_or_die(project_path)
-    out = prepare_identifiers_sidecar(
-        project.identifiers.hip_hd_ecsv,
-        project.identifiers.iv27a_catalog_ecsv,
-        project.identifiers.iv27a_proper_names_ecsv,
-        project.identifiers.output_parquet,
-        crossmatch_parquet=_crossmatch_parquet(project),
-        overrides_data_dir=_overrides_data_dir(project),
-        overwrite=force,
-    )
-    click.echo(f"Wrote wide identifier sidecar to {out.resolve()}")
-
-
 @cli.command(name="build")
 @click.option(
     "--project",

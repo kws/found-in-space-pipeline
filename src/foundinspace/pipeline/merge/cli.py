@@ -18,7 +18,7 @@ def _load_project_or_die(project_path: Path):
         raise click.ClickException(str(exc)) from exc
 
 
-@cli.command(name="prepare")
+@cli.command(name="build")
 @click.option(
     "--project",
     "project_path",
@@ -27,7 +27,7 @@ def _load_project_or_die(project_path: Path):
     help="Path to pipeline project TOML.",
 )
 @click.option("--force", "-f", is_flag=True, default=False)
-def prepare(
+def build(
     project_path: Path,
     force: bool,
 ) -> None:

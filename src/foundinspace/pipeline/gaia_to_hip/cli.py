@@ -22,28 +22,6 @@ def _load_project_or_die(project_path: Path):
         raise click.ClickException(str(exc)) from exc
 
 
-@cli.command(name="prepare")
-@click.option(
-    "--project",
-    "project_path",
-    required=True,
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    help="Path to pipeline project TOML.",
-)
-@click.option("--force", "-f", is_flag=True, default=False)
-def prepare_cmd(
-    project_path: Path,
-    force: bool,
-) -> None:
-    project = _load_project_or_die(project_path)
-    out = prepare_gaia_hip_mapping(
-        project.gaia_to_hip.download_ecsv,
-        project.gaia_to_hip.output_parquet,
-        overwrite=force,
-    )
-    click.echo(f"Wrote Gaia↔HIP mapping sidecar to {out.resolve()}")
-
-
 @cli.command(name="build")
 @click.option(
     "--project",

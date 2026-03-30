@@ -38,7 +38,7 @@ Recommended outputs:
 
 The main Gaia star feed query (above) does **not** include Hipparcos identifiers. The merger instead uses a small sidecar Parquet (`gaia_hip_map.parquet`) built from the Gaia archive table `gaiadr3.hipparcos2_best_neighbour` (~100k rows).
 
-**In this repo:** run `fis-pipeline gaia-to-hip build` (or `download` then `prepare`). Defaults: ECSV under `data/catalogs/`, Parquet at `data/processed/gaia_hip_map.parquet`.
+**In this repo:** run `fis-pipeline gaia-to-hip build`. Defaults: ECSV under `data/catalogs/`, Parquet at `data/processed/gaia_hip_map.parquet`.
 
 **Standalone TAP recipe** (equivalent to `gaia-to-hip download`):
 
@@ -63,7 +63,7 @@ result.write("gaia_hipparcos2_best_neighbour.ecsv", format="ascii.ecsv", overwri
 
 ## Hipparcos workflow
 
-**In this repo:** run `fis-pipeline hip build` (or `hip download` then `hip prepare`).
+**In this repo:** run `fis-pipeline hip build`.
 
 ## 1) Download Hipparcos
 
