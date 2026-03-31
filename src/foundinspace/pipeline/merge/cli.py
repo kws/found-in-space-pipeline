@@ -3,7 +3,7 @@ from pathlib import Path
 import click
 
 from foundinspace.pipeline.merge.pipeline import run_merge
-from foundinspace.pipeline.project import load_project
+from foundinspace.pipeline.project import PipelineProject, load_project
 
 
 @click.group(name="merge")
@@ -11,9 +11,12 @@ def cli():
     """Merge Gaia/HIP/overrides into HEALPix-partitioned Parquet output."""
 
 
-def _load_project_or_die(project_path: Path):
+def _load_project_or_die(project_path: Path, *required: str) -> PipelineProject:
     try:
-        return load_project(project_path)
+        project = load_project(project_path)
+        if required:
+            project.require(*required)
+        return project
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
 
@@ -32,7 +35,7 @@ def build(
     force: bool,
 ) -> None:
     """Run the streaming merge and emit HEALPix-partitioned outputs."""
-    project = _load_project_or_die(project_path)
+    project = _load_project_or_die(project_path, "merge", "gaia", "hip", "gaia-to-hip", "overrides")
     output_dir = project.merge.output_dir
     report = run_merge(
         gaia_dir=project.gaia.output_dir,

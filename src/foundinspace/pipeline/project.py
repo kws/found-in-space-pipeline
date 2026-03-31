@@ -9,9 +9,6 @@ import tomllib
 
 FORMAT_VERSION = 1
 
-_SECTION_NAMES = {"gaia", "gaia-to-hip", "hip", "identifiers", "overrides", "merge"}
-_TOP_LEVEL_KEYS = {"format_version"} | _SECTION_NAMES
-
 _GAIA_KEYS = {"output_dir", "mag_limit"}
 _GAIA_TO_HIP_KEYS = {"download_ecsv", "output_parquet"}
 _HIP_KEYS = {"download_ecsv", "output_parquet"}
@@ -65,6 +62,11 @@ class _SectionAccessor:
         self._section = section_name
         self._raw = raw
         self._project_dir = project_dir
+
+    @property
+    def is_configured(self) -> bool:
+        """True if this section was present in the project file."""
+        return self._raw is not None
 
     def _require_path(self, key: str) -> Path:
         if self._raw is None:
@@ -176,6 +178,32 @@ class PipelineProject:
     overrides: OverridesConfig
     merge: MergeConfig
 
+    def require(self, *section_names: str) -> None:
+        """Raise ValueError listing all missing required sections at once.
+
+        Call this at the start of a command to fail fast with a complete list
+        of missing sections rather than surfacing one error per re-run.
+        """
+        known: dict[str, _SectionAccessor] = {
+            self.gaia._section: self.gaia,
+            self.gaia_to_hip._section: self.gaia_to_hip,
+            self.hip._section: self.hip,
+            self.identifiers._section: self.identifiers,
+            self.overrides._section: self.overrides,
+            self.merge._section: self.merge,
+        }
+        unknown = sorted(set(section_names) - set(known))
+        if unknown:
+            raise ValueError(
+                f"require() called with unknown section name(s): {', '.join(unknown)}"
+            )
+        missing = [n for n in section_names if not known[n].is_configured]
+        if missing:
+            raise ValueError(
+                "Missing required config sections: "
+                + ", ".join(f"[{n}]" for n in missing)
+            )
+
 
 def _validate_section(
     raw: dict[str, Any],
@@ -198,8 +226,6 @@ def load_project(project_path: Path) -> PipelineProject:
 
     if not isinstance(raw, dict):
         raise ValueError("Project file root must be a TOML table")
-
-    _reject_unknown_keys(raw, allowed=_TOP_LEVEL_KEYS, table_name="root")
 
     format_version = raw.get("format_version")
     if format_version != FORMAT_VERSION:

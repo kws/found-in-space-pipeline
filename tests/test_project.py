@@ -206,6 +206,77 @@ def test_load_project_sections_are_independent(tmp_path: Path) -> None:
         _ = project.hip.output_parquet
 
 
+def test_load_project_ignores_unknown_top_level_sections(tmp_path: Path) -> None:
+    """Unknown top-level sections (e.g. from other pipeline tools) are silently ignored."""
+    project_path = tmp_path / "project.toml"
+    project_path.write_text(
+        'format_version = 1\n\n'
+        '[gaia]\noutput_dir = "data/processed/gaia"\n\n'
+        '[rezaei2024]\ncatalog_gz = "data/catalogs/finalmap.dat.gz"\n'
+        'output_bin = "data/processed/dust_map.bin"\n',
+        encoding="utf-8",
+    )
+
+    project = load_project(project_path)
+    assert project.gaia.output_dir == tmp_path / "data" / "processed" / "gaia"
+
+
+def test_section_is_configured_true_when_present(tmp_path: Path) -> None:
+    project_path = tmp_path / "project.toml"
+    project_path.write_text(_project_text(), encoding="utf-8")
+
+    project = load_project(project_path)
+    assert project.gaia.is_configured is True
+    assert project.hip.is_configured is True
+    assert project.merge.is_configured is True
+
+
+def test_section_is_configured_false_when_absent(tmp_path: Path) -> None:
+    project_path = tmp_path / "project.toml"
+    project_path.write_text(
+        'format_version = 1\n\n[gaia]\noutput_dir = "data/processed/gaia"\n',
+        encoding="utf-8",
+    )
+
+    project = load_project(project_path)
+    assert project.gaia.is_configured is True
+    assert project.hip.is_configured is False
+    assert project.merge.is_configured is False
+    assert project.gaia_to_hip.is_configured is False
+
+
+def test_require_succeeds_when_all_sections_present(tmp_path: Path) -> None:
+    project_path = tmp_path / "project.toml"
+    project_path.write_text(_project_text(), encoding="utf-8")
+
+    project = load_project(project_path)
+    project.require("gaia", "hip", "merge")
+
+
+def test_require_raises_listing_all_missing_sections(tmp_path: Path) -> None:
+    project_path = tmp_path / "project.toml"
+    project_path.write_text(
+        'format_version = 1\n\n[gaia]\noutput_dir = "data/processed/gaia"\n',
+        encoding="utf-8",
+    )
+
+    project = load_project(project_path)
+    with pytest.raises(ValueError, match=r"\[hip\]"):
+        project.require("gaia", "hip", "merge")
+
+    with pytest.raises(ValueError, match=r"\[merge\]"):
+        project.require("gaia", "hip", "merge")
+
+
+def test_require_raises_for_unknown_section_name(tmp_path: Path) -> None:
+    project_path = tmp_path / "project.toml"
+    project_path.write_text(_project_text(), encoding="utf-8")
+
+    project = load_project(project_path)
+    with pytest.raises(ValueError, match="unknown section name"):
+        project.require("rezaei2024")
+
+
 def test_render_project_template_is_valid_toml_with_all_sections() -> None:
     rendered = render_project_template()
     parsed = tomllib.loads(rendered)

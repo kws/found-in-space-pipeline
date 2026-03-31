@@ -3,7 +3,7 @@ from pathlib import Path
 import click
 
 from foundinspace.pipeline.gaia.pipeline import main
-from foundinspace.pipeline.project import load_project
+from foundinspace.pipeline.project import PipelineProject, load_project
 
 
 @click.group(name="gaia")
@@ -11,9 +11,12 @@ def cli():
     pass
 
 
-def _load_project_or_die(project_path: Path):
+def _load_project_or_die(project_path: Path, *required: str) -> PipelineProject:
     try:
-        return load_project(project_path)
+        project = load_project(project_path)
+        if required:
+            project.require(*required)
+        return project
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
 
@@ -41,7 +44,7 @@ def build_gaia(
         click.echo("No input files provided")
         return
 
-    project = _load_project_or_die(project_path)
+    project = _load_project_or_die(project_path, "gaia")
     output_root = project.gaia.output_dir
     output_root.mkdir(parents=True, exist_ok=True)
 

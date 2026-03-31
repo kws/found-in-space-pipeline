@@ -4,7 +4,7 @@ import click
 
 from foundinspace.pipeline.gaia_to_hip import download
 from foundinspace.pipeline.gaia_to_hip.pipeline import prepare_gaia_hip_mapping
-from foundinspace.pipeline.project import load_project
+from foundinspace.pipeline.project import PipelineProject, load_project
 
 
 @click.group(name="gaia-to-hip")
@@ -15,9 +15,12 @@ def cli():
 cli.add_command(download.main, name="download")
 
 
-def _load_project_or_die(project_path: Path):
+def _load_project_or_die(project_path: Path, *required: str) -> PipelineProject:
     try:
-        return load_project(project_path)
+        project = load_project(project_path)
+        if required:
+            project.require(*required)
+        return project
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
 
@@ -35,7 +38,7 @@ def build_cmd(
     project_path: Path,
     force: bool,
 ) -> None:
-    project = _load_project_or_die(project_path)
+    project = _load_project_or_die(project_path, "gaia-to-hip")
     download_output = project.gaia_to_hip.download_ecsv
     download.ensure_hipparcos2_best_neighbour_ecsv(download_output, force=force)
     out = prepare_gaia_hip_mapping(

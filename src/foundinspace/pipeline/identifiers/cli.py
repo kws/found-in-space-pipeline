@@ -4,7 +4,7 @@ import click
 
 from foundinspace.pipeline.identifiers import download
 from foundinspace.pipeline.identifiers.pipeline import prepare_identifiers_sidecar
-from foundinspace.pipeline.project import load_project
+from foundinspace.pipeline.project import PipelineProject, load_project
 
 
 @click.group(name="identifiers")
@@ -15,30 +15,14 @@ def cli():
 cli.add_command(download.main, name="download")
 
 
-def _load_project_or_die(project_path: Path):
+def _load_project_or_die(project_path: Path, *required: str) -> PipelineProject:
     try:
-        return load_project(project_path)
+        project = load_project(project_path)
+        if required:
+            project.require(*required)
+        return project
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
-
-
-def _crossmatch_parquet(project) -> Path | None:
-    """Read crossmatch path from [gaia-to-hip] if the section and file exist."""
-    try:
-        cm = project.gaia_to_hip.output_parquet
-    except ValueError:
-        return None
-    if not cm.is_file():
-        return None
-    return cm
-
-
-def _overrides_data_dir(project) -> Path | None:
-    """Read data_dir from [overrides] if the section and key exist."""
-    try:
-        return project.overrides.data_dir
-    except ValueError:
-        return None
 
 
 @cli.command(name="build")
@@ -54,20 +38,26 @@ def build(
     project_path: Path,
     force: bool,
 ) -> None:
-    project = _load_project_or_die(project_path)
+    project = _load_project_or_die(project_path, "identifiers")
     outputs = download.ensure_identifier_catalogs(
         hip_hd_output=project.identifiers.hip_hd_ecsv,
         iv27a_catalog_output=project.identifiers.iv27a_catalog_ecsv,
         iv27a_proper_names_output=project.identifiers.iv27a_proper_names_ecsv,
         force=force,
     )
+    crossmatch_parquet = (
+        project.gaia_to_hip.output_parquet if project.gaia_to_hip.is_configured else None
+    )
+    overrides_data_dir = (
+        project.overrides.data_dir if project.overrides.is_configured else None
+    )
     out = prepare_identifiers_sidecar(
         outputs["hip_hd"],
         outputs["iv27a_catalog"],
         outputs["iv27a_proper_names"],
         project.identifiers.output_parquet,
-        crossmatch_parquet=_crossmatch_parquet(project),
-        overrides_data_dir=_overrides_data_dir(project),
+        crossmatch_parquet=crossmatch_parquet,
+        overrides_data_dir=overrides_data_dir,
         overwrite=force,
     )
     click.echo(f"Wrote wide identifier sidecar to {out.resolve()}")
