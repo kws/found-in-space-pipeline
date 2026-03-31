@@ -13,7 +13,8 @@ from foundinspace.pipeline.project import (
 
 
 def _project_text() -> str:
-    return """
+    return (
+        """
 format_version = 1
 
 [gaia]
@@ -39,7 +40,9 @@ output_parquet = "data/processed/overrides.parquet"
 [merge]
 output_dir = "data/processed/merged"
 healpix_order = 3
-""".strip() + "\n"
+""".strip()
+        + "\n"
+    )
 
 
 def test_load_project_resolves_relative_paths_from_project_file_dir(
@@ -56,8 +59,14 @@ def test_load_project_resolves_relative_paths_from_project_file_dir(
 
     assert project.gaia.output_dir == project_dir / "data" / "processed" / "gaia"
     assert project.gaia.mag_limit is None
-    assert project.hip.output_parquet == project_dir / "data" / "processed" / "hip_stars.parquet"
-    assert project.gaia_to_hip.download_ecsv == project_dir / "data" / "catalogs" / "gaia_hipparcos2_best_neighbour.ecsv"
+    assert (
+        project.hip.output_parquet
+        == project_dir / "data" / "processed" / "hip_stars.parquet"
+    )
+    assert (
+        project.gaia_to_hip.download_ecsv
+        == project_dir / "data" / "catalogs" / "gaia_hipparcos2_best_neighbour.ecsv"
+    )
     assert project.merge.healpix_order == 3
     assert project.merge.output_dir == project_dir / "data" / "processed" / "merged"
 
@@ -210,7 +219,7 @@ def test_load_project_ignores_unknown_top_level_sections(tmp_path: Path) -> None
     """Unknown top-level sections (e.g. from other pipeline tools) are silently ignored."""
     project_path = tmp_path / "project.toml"
     project_path.write_text(
-        'format_version = 1\n\n'
+        "format_version = 1\n\n"
         '[gaia]\noutput_dir = "data/processed/gaia"\n\n'
         '[rezaei2024]\ncatalog_gz = "data/catalogs/finalmap.dat.gz"\n'
         'output_bin = "data/processed/dust_map.bin"\n',

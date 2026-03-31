@@ -68,9 +68,7 @@ def _row_for_star(star: dict[str, Any]) -> dict[str, Any]:
     missing = [k for k in ("mag_abs", "teff") if k not in star or star[k] is None]
     if missing:
         oid = star.get("override_id", "?")
-        raise ValueError(
-            f"Non-drop override {oid!r} missing required keys: {missing}"
-        )
+        raise ValueError(f"Non-drop override {oid!r} missing required keys: {missing}")
 
     qf = int(np.uint16(DIST_SRC_OVERRIDE | FLAG_DIST_VALID))
     out = {

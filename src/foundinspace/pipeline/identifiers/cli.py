@@ -46,7 +46,9 @@ def build(
         force=force,
     )
     crossmatch_parquet = (
-        project.gaia_to_hip.output_parquet if project.gaia_to_hip.is_configured else None
+        project.gaia_to_hip.output_parquet
+        if project.gaia_to_hip.is_configured
+        else None
     )
     overrides_data_dir = (
         project.overrides.data_dir if project.overrides.is_configured else None

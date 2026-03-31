@@ -35,7 +35,9 @@ def build(
     force: bool,
 ) -> None:
     """Run the streaming merge and emit HEALPix-partitioned outputs."""
-    project = _load_project_or_die(project_path, "merge", "gaia", "hip", "gaia-to-hip", "overrides")
+    project = _load_project_or_die(
+        project_path, "merge", "gaia", "hip", "gaia-to-hip", "overrides"
+    )
     output_dir = project.merge.output_dir
     report = run_merge(
         gaia_dir=project.gaia.output_dir,

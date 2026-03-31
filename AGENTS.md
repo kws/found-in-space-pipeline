@@ -13,6 +13,13 @@
 - Add a dependency: `uv add <package>`
 - Add a dev dependency: `uv add --dev <package>`
 
+### Pre-commit (Ruff)
+
+- Install git hooks once: `uv run pre-commit install`
+- Run on all files: `uv run pre-commit run --all-files`
+
+Hooks: `ruff-check` (lint + fix) and `ruff-format`, scoped to `src/` and `tests/`.
+
 ### Examples
 
 - `uv run fis-pipeline --help`

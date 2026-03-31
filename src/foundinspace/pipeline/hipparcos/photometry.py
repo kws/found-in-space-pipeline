@@ -42,12 +42,7 @@ def compute_mag_abs_hip(df: pd.DataFrame) -> pd.DataFrame:
     mag = df["mag"].astype(float).to_numpy()
     plx_arr = df["Plx"].astype(float).to_numpy()
     e_plx = df["e_Plx"].astype(float).to_numpy()
-    valid_plx = (
-        np.isfinite(plx_arr)
-        & (plx_arr > 0)
-        & np.isfinite(e_plx)
-        & (e_plx > 0)
-    )
+    valid_plx = np.isfinite(plx_arr) & (plx_arr > 0) & np.isfinite(e_plx) & (e_plx > 0)
     f_hip = np.full(plx_arr.shape, np.nan, dtype=float)
     np.divide(e_plx, plx_arr, out=f_hip, where=valid_plx)
 

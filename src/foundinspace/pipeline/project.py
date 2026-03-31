@@ -22,7 +22,9 @@ _OVERRIDES_KEYS = {"output_parquet", "data_dir"}
 _MERGE_KEYS = {"output_dir", "healpix_order"}
 
 
-def _reject_unknown_keys(raw: dict[str, Any], *, allowed: set[str], table_name: str) -> None:
+def _reject_unknown_keys(
+    raw: dict[str, Any], *, allowed: set[str], table_name: str
+) -> None:
     unknown = sorted(set(raw) - allowed)
     if unknown:
         raise ValueError(f"Unknown key(s) in [{table_name}]: {', '.join(unknown)}")
@@ -58,7 +60,9 @@ def _require_int(raw: dict[str, Any], key: str, *, field_name: str) -> int:
 
 
 class _SectionAccessor:
-    def __init__(self, section_name: str, raw: dict[str, Any] | None, project_dir: Path) -> None:
+    def __init__(
+        self, section_name: str, raw: dict[str, Any] | None, project_dir: Path
+    ) -> None:
         self._section = section_name
         self._raw = raw
         self._project_dir = project_dir
@@ -72,13 +76,17 @@ class _SectionAccessor:
         if self._raw is None:
             raise ValueError(f"Missing [{self._section}] table in project file")
         value = _require_str(self._raw, key, field_name=f"{self._section}.{key}")
-        return _resolve_path(self._project_dir, value, field_name=f"{self._section}.{key}")
+        return _resolve_path(
+            self._project_dir, value, field_name=f"{self._section}.{key}"
+        )
 
     def _optional_path(self, key: str) -> Path | None:
         if self._raw is None or key not in self._raw:
             return None
         value = _require_str(self._raw, key, field_name=f"{self._section}.{key}")
-        return _resolve_path(self._project_dir, value, field_name=f"{self._section}.{key}")
+        return _resolve_path(
+            self._project_dir, value, field_name=f"{self._section}.{key}"
+        )
 
     def _require_int_field(self, key: str) -> int:
         if self._raw is None:
@@ -258,7 +266,7 @@ def render_project_template() -> str:
         f"format_version = {FORMAT_VERSION}\n\n"
         "[gaia]\n"
         'output_dir = "data/processed/gaia"\n'
-        '# mag_limit = 15.0\n\n'
+        "# mag_limit = 15.0\n\n"
         "[gaia-to-hip]\n"
         'download_ecsv = "data/catalogs/gaia_hipparcos2_best_neighbour.ecsv"\n'
         'output_parquet = "data/processed/gaia_hip_map.parquet"\n\n'

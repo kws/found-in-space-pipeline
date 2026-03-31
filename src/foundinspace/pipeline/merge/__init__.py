@@ -1,2 +1,1 @@
 """Merge pipeline package."""
-

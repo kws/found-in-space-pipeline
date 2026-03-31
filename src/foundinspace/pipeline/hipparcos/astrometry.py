@@ -21,12 +21,7 @@ def select_astrometry_hip(df: pd.DataFrame) -> pd.DataFrame:
     """
     plx_arr = df["Plx"].astype(float).to_numpy()
     e_plx = df["e_Plx"].astype(float).to_numpy()
-    valid = (
-        np.isfinite(plx_arr)
-        & np.isfinite(e_plx)
-        & (plx_arr > 0)
-        & (e_plx > 0)
-    )
+    valid = np.isfinite(plx_arr) & np.isfinite(e_plx) & (plx_arr > 0) & (e_plx > 0)
     f_hip = np.full(plx_arr.shape, np.nan, dtype=float)
     np.divide(e_plx, plx_arr, out=f_hip, where=valid)
 

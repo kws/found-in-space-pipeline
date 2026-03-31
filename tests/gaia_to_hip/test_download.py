@@ -43,4 +43,3 @@ def test_fetch_uses_async_job_and_writes_ecsv(tmp_path: Path, monkeypatch):
     table = Table.read(output, format="ascii.ecsv")
     assert len(table) == 2
     assert "FROM gaiadr3.hipparcos2_best_neighbour" in captured["query"]
-
