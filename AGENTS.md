@@ -10,6 +10,7 @@
 - Sync/install dependencies: `uv sync`
 - Run Python entrypoints/tools: `uv run <command>`
 - Run tests: `uv run pytest`
+- CI: on push/PR to `main`, GitHub Actions runs `uv run pytest` with coverage (see `.github/workflows/ci.yml`).
 - Add a dependency: `uv add <package>`
 - Add a dev dependency: `uv add --dev <package>`
 
